@@ -3,10 +3,10 @@
 > **Status**: ✅ **Implemented** — the scored run is held and scored, and this is its result. It is written once.
 > **Last updated**: 2026-11-27
 > **Reports on**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md), under the [AI raters deviation](EXP-001-deviation-ai-raters.md)
-> **Second part**: [how the run was scored](EXP-001-result-scoring.md) · **Records**: [`evaluators/experiments/EXP-001/runs/`](../../evaluators/experiments/EXP-001/runs/README.md)
+> **Second part**: [how the run was scored](EXP-001-result-scoring.md) · **Third part**: [what changed, and what is published](EXP-001-result-changes.md) · **Records**: [`evaluators/experiments/EXP-001/runs/`](../../evaluators/experiments/EXP-001/runs/README.md)
 
-Two AI raters scored this run in the place of the two people the
-pre-registration asks for. The maintainer decided that on 2026-11-10, and the
+Two [AI raters](../methodology/process-glossary.md#ai-rater) scored this run
+in the place of the two people the pre-registration asks for. The maintainer decided that on 2026-11-10, and the
 [deviation](EXP-001-deviation-ai-raters.md) records it. So **no rule fires as
 registered**.
 
@@ -15,7 +15,8 @@ does not clearly beat arm A, one model call that plays all four advisers.
 It does not beat it at all: at $1.00 a quality point, C's memos were worth
 less than A's, on average, in each of the five series.
 
-**The limit.** The arms (`claude-sonnet-4-6`), the judge (`claude-opus-5`)
+**The limit.** The arms (`claude-sonnet-4-6`), the
+[LLM judge](../methodology/process-glossary.md#llm-judge) (`claude-opus-5`)
 and both AI raters (`claude-fable-5-2`) are all Claude models from one
 provider, and both AI raters run the same model. Models from one family can
 share blind spots and agree for the same wrong reason. So the raters'
@@ -80,8 +81,11 @@ Two later decisions bear on it, and the result names both beside the rule:
 ## 3. The raters, and how far they agree
 
 Three raters scored every memo and recall reply: rater 1 and rater 2, the
-two AI raters, and the judge. A memo's quality is the average of their three
-totals, out of 10.
+two AI raters, and the judge. Each read the same **packets**. A packet is
+one memo or recall reply, with the operator's messages and the answer key,
+under a random ID that hides which arm wrote it. The **seal** is the map
+from those IDs back to the arms, and it stays shut until every score is in.
+A memo's quality is the average of the three raters' totals, out of 10.
 
 | Pair | Agreement, plan by plan | Plans used | Plans skipped | Over all 100 memos at once |
 |---|---|---|---|---|
@@ -103,8 +107,11 @@ last scored meeting. The seal was opened on 2026-11-26 at 19:48:29 UTC.
 
 A memo's value is $1.00 times its quality, minus its arm's dollars per plan.
 Each row compares two arms: the series differences in value, their average,
-and the interval around it. X beats Y only when the whole interval is above
-zero.
+and the interval around it. The interval is
+[part 2 §5](EXP-001-preregistration-scoring.md#5-how-a-rule-fires)'s: the
+average, plus or minus 2.776 times the differences' standard deviation
+divided by the square root of five. X beats Y only when the whole interval
+is above zero.
 
 | Comparison | Series 1 | Series 2 | Series 3 | Series 4 | Series 5 | Average | Interval | Verdict |
 |---|---|---|---|---|---|---|---|---|
@@ -144,8 +151,15 @@ of 0.878.
 | D′ | 8.704 | 8.467 | 9.417 | $0.3585 | $0.3272 | 24.278 | 12.421 | 0.701 | 20 of 20 |
 
 Arms A, B and C carry nothing from one meeting to the next, by design, so
-they answer no recall question. The control plans are the ones no earlier
+they got no recall question right. The control plans are the ones no earlier
 fact bears on; they show whether memory gets in the way.
+
+**The cost ledger is not reported.**
+[Part 1, §3](EXP-001-preregistration.md#3-running-it) says the
+orchestrator's own cost ledger is reported beside these dollars. The
+harness's result and the run's report do not hold it, so no ledger figure
+is given here. The dollars above are the fixed table's, priced from every
+recorded call.
 
 Each criterion on its own, 0 to 2, averaged over every rater and memo.
 Criterion 2 is averaged only over the plans that score it.
@@ -170,12 +184,12 @@ meeting" in
 [`scores.txt`](../../evaluators/experiments/EXP-001/runs/scored/scores.txt).
 Counted by arm:
 
-| Arm | Closed by the idle window | Closed by the depth cap | Memos cut at 400 words | Lowest energy at a memo turn |
+| Arm | Closed by the idle window, of 30 meetings | Closed by the depth cap, of 30 meetings | Memos cut at 400 words, of 20 | Lowest energy at a memo turn |
 |---|---|---|---|---|
-| B | 11 | 19 | 6 of 20 | 0.55 |
-| C | 19 | 11 | 6 of 20 | 0.60 |
-| D | 29 | 1 | 10 of 20 | 0.70 |
-| D′ | 26 | 4 | 14 of 20 | 0.70 |
+| B | 11 | 19 | 6 | 0.55 |
+| C | 19 | 11 | 6 | 0.60 |
+| D | 29 | 1 | 10 | 0.70 |
+| D′ | 26 | 4 | 14 | 0.70 |
 
 - Arm A is one call a meeting. It has no discussion to close, and none of
   its memos was cut.
@@ -191,10 +205,17 @@ Counted by arm:
 
 ## 7. What this result cannot show
 
-The limits the pre-registration named before the run still hold
-([part 1, §4](EXP-001-preregistration.md#4-what-it-cannot-show)): one job,
-one model, one language, invented organisations, and one run of each arm for
-each series. The deviation adds its own
+The nine limits the pre-registration named before the run still hold
+([part 1, §4](EXP-001-preregistration.md#4-what-it-cannot-show)). Among
+them: one job, one model, one language, invented organisations, and one run
+of each arm for each series.
+
+One of the nine bears on the rule that fired. Every meeting had one
+audience, so the audience gate was never tested. Rule 1 falls back on "the
+gate alone", and that fallback is assumed to be worth something, not
+measured.
+
+The deviation adds its own limit
 ([§4](EXP-001-deviation-ai-raters.md#4-the-limit)), stated at the top of this
 document.
 
@@ -202,97 +223,33 @@ The sequencing Amendment 2026-10-18 adds a third. EXP-001 measures a short
 job: six meetings, each ending in one memo. It cannot show whether a society
 of agents keeps making progress on a long task.
 
-## 8. What changed after the pre-registration merged
+## 8. What changed, and what is published
 
-The pre-registration merged on 2026-09-18
-([#969](https://github.com/mkhomutov/Persatrix/pull/969)).
+The [third part](EXP-001-result-changes.md) lists both in full. In short:
 
-- **The two documents.** One PR touched them:
-  [#984](https://github.com/mkhomutov/Persatrix/pull/984) added a link to
-  the harness document under part 1's related documentation. No rule, arm,
-  price or figure changed.
-- **The materials and the spend caps.** No PR changed them.
-- **What a fired rule decides, and which review receives it.** The strategy
-  review of 2026-10-18 and the amendment that ratifies it, by rulings (h)
-  and (l) ([§1](#1-what-rule-1-says-and-what-it-now-decides)). This is the
-  route [part 1, §5](EXP-001-preregistration.md#5-changes) leaves for a
-  change to part 2.
-- **The harness, before the first scored meeting.** PRs
-  [#984](https://github.com/mkhomutov/Persatrix/pull/984),
-  [#986](https://github.com/mkhomutov/Persatrix/pull/986),
-  [#987](https://github.com/mkhomutov/Persatrix/pull/987),
-  [#988](https://github.com/mkhomutov/Persatrix/pull/988),
-  [#992](https://github.com/mkhomutov/Persatrix/pull/992),
-  [#993](https://github.com/mkhomutov/Persatrix/pull/993),
-  [#1013](https://github.com/mkhomutov/Persatrix/pull/1013),
-  [#1015](https://github.com/mkhomutov/Persatrix/pull/1015),
-  [#1018](https://github.com/mkhomutov/Persatrix/pull/1018),
-  [#1021](https://github.com/mkhomutov/Persatrix/pull/1021),
-  [#1023](https://github.com/mkhomutov/Persatrix/pull/1023),
-  [#1024](https://github.com/mkhomutov/Persatrix/pull/1024),
-  [#1032](https://github.com/mkhomutov/Persatrix/pull/1032) and
-  [#1036](https://github.com/mkhomutov/Persatrix/pull/1036). The
-  [harness document](EXP-001-harness.md) says what each one adds, and the
-  [frozen choices](EXP-001-harness-choices.md) list what each one chose.
-- **The harness, after the first scored meeting.** Part 1 §5 allows no
-  change from then on, so each of these is named here:
-  - [#1091](https://github.com/mkhomutov/Persatrix/pull/1091), harness PR
-    6d, merged on 2026-11-10 with the seal shut. It adds the scoring step
-    PR 6c left to it: the score sheets, opening the seal, and the result's
-    figures. It changes no mechanic the run was held with, and the
-    arithmetic is PR 2's
-    ([where it stands](EXP-001-harness-choices-scoring.md)).
-  - [#1095](https://github.com/mkhomutov/Persatrix/pull/1095), merged on
-    2026-11-10, is the deviation. It adds the AI raters' commands:
-    `rater-batches`, `rater-brief`, `rater-enter`, `rater-keep`,
-    `rater-audit`, `rater-same-notes`, `rater-ready` and
-    `rater-differences`.
-  - [#1140](https://github.com/mkhomutov/Persatrix/pull/1140), merged on
-    2026-11-20, corrects the check on a rater run's record, after the
-    practice refused two runs that had followed the rules
-    ([second part](EXP-001-result-scoring.md#2-the-runs-and-the-ones-held-again)).
-- **The raters.** Two AI raters in the two people's place, with eight
-  smaller differences from the deviation's own rules
-  ([second part](EXP-001-result-scoring.md#4-eight-differences-from-the-rater-rules)).
-- **Discarded outputs.** None.
+- **Changes.** One PR touched the two pre-registration documents, to add a
+  link. No PR changed the materials or the spend caps. The strategy review
+  of 2026-10-18 and its amendment changed what a fired rule decides and
+  which review receives it ([§1](#1-what-rule-1-says-and-what-it-now-decides)).
+  Three harness PRs merged after the first scored meeting, from which part
+  1 §5 allows no change, so each is named there: the scoring step
+  ([#1091](https://github.com/mkhomutov/Persatrix/pull/1091)), the AI
+  raters' commands
+  ([#1095](https://github.com/mkhomutov/Persatrix/pull/1095)) and a
+  correction to them
+  ([#1140](https://github.com/mkhomutov/Persatrix/pull/1140)). No output
+  was discarded.
+- **Published.** The transcripts and memos, the result as the harness wrote
+  it, and the AI raters' prompts, answers, public records and logs, all
+  under
+  [`evaluators/experiments/EXP-001/runs/`](../../evaluators/experiments/EXP-001/runs/README.md).
+  The public records of two refused practice runs are held back until the
+  maintainer has read them.
+- **A cross-check.** Scored again from a copy, the run gave the same
+  result, byte for byte
+  ([how](EXP-001-result-changes.md#2-what-is-published-with-this-result)).
 
-## 9. What is published with this result
-
-Everything is under
-[`evaluators/experiments/EXP-001/runs/`](../../evaluators/experiments/EXP-001/runs/README.md),
-copied byte for byte from the run's own files:
-
-- **The transcripts and memos**: for each series and arm, every meeting's
-  record, with each message posted, the memo or recall reply, what closed
-  the discussion and each adviser's energy.
-- **The result as the harness wrote it**: `scores.json` and `scores.txt`,
-  which every figure here comes from; the scored run's report; and
-  `opened.json`, which holds the moment the seal opened and a SHA-256 of
-  each sheet, the judge's answers and calls, the packets, the seal and the
-  result.
-- **The AI raters' records**, as
-  [rule 6](EXP-001-deviation-ai-raters.md#5-the-rater-rules) lists them:
-  each prompt, each entered or kept answer, each run's public record, and
-  each session's `runs.jsonl`. With them, the
-  [notes](../../evaluators/experiments/EXP-001/runs/ai-raters/notes.md)
-  both raters accepted in practice.
-
-Two files are held back: the public records of the two refused practice
-runs. Rule 6 has the maintainer read a refused run's copy before it is
-published.
-
-The maintainer keeps the rest unpublished: each run's full record, the
-advisers' stores and logs, the per-call logs, the packets file, the seal,
-the judge's answers and the two sheets.
-
-**A cross-check.** The session that wrote this document copied the run
-without the advisers' stores and logs, and had the harness at `ff411f9`
-score the copy again. The harness accepted every hash `opened.json` holds
-and wrote `scores.json` and `scores.txt` again, byte for byte the same.
-Every figure here is from those two files; nothing was worked out apart
-from them.
-
-## 10. What happens next
+## 9. What happens next
 
 The first strategy review held after this result logs the rule, with part
 2's readings and the two decisions of
@@ -304,6 +261,9 @@ changes is ratified by a sequencing amendment.
 - [How the run was scored](EXP-001-result-scoring.md) — the AI raters'
   runs, the eight differences from their rules, and who read what, and
   when.
+- [What changed, and what is published](EXP-001-result-changes.md) — every
+  PR that changed the documents, the materials or the harness, and every
+  record published.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) and
   [part 2](EXP-001-preregistration-scoring.md) — the materials, the arms,
   the scoring and how a rule fires.

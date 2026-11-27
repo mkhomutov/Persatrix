@@ -15,7 +15,7 @@ scoring went. This is that report. Times are UTC.
   Fable 5.2, `claude-fable-5-2`, in an empty folder outside any repository.
   A rater's session never reads a packet. It hands each prompt to a fresh
   run of the same model, which reads that one prompt, calls no other tool
-  and hands back its scores. Rater 1 filled person-1's sheet and rater 2
+  and hands back its answer: the scores, with a line on each memo. Rater 1 filled person-1's sheet and rater 2
   person-2's.
 - **The judge.** `claude-opus-5`, one pass per packet, on 2026-11-06, as
   registered. No rater saw its scores.
@@ -46,14 +46,15 @@ run, of its first batch, was refused on 2026-11-20 at 22:17. Both runs had
 followed the rules. Claude Code had given each its own commit and
 pull-request attribution lines, a kind of added text the harness's check on
 a run's record did not know, so the check refused the record. As rule 7
-provides, the harness was corrected by a pull request the maintainer
-reviewed, [#1140](https://github.com/mkhomutov/Persatrix/pull/1140), merged
-on 2026-11-20 at 23:26. Each batch was then held again whole by a fresh
+provides, the harness was corrected by a pull request,
+[#1140](https://github.com/mkhomutov/Persatrix/pull/1140). A session on
+`claude-fable-5-2` reviewed it, and the maintainer merged it on 2026-11-20
+at 23:26. Each batch was then held again whole by a fresh
 run, and that run was entered.
 
 **No scored run was refused, failed or held again.** Each of the 18 scored
-batches took one run per rater. Scoring ran on 2026-11-26 from 11:46 to
-12:17.
+batches took one run per rater. The first scored run started on 2026-11-26
+at 11:44 and the last answer was entered at 12:17.
 
 **Set-up.** Every notes run and every scored run was on Claude Code 2.1.328
 and the harness at `ff411f9`, the commit that merged #1140. Before the seal
@@ -63,8 +64,9 @@ runs were on Claude Code 2.1.325 and one on 2.1.328.
 
 **The checks before the seal.** `rater-same-notes` passed on both folders of
 scored prompts before any scored run was briefed. Once every score was in,
-`rater-audit` listed nothing for either rater, and `rater-ready` said the
-seal may be opened.
+each rater's session ran `rater-audit` and the coordinating session ran it
+again: it listed nothing for either rater. `rater-ready` then said the seal
+may be opened.
 
 **Cost.** No money beyond the maintainer's Claude Code plan: no API key was
 used. The 46 runs wrote 1 734 202 tokens to the cache, read 4 037 442 from
@@ -110,11 +112,10 @@ expected, in eight ways. None changed a score after it was given.
    unchanged.
 5. **A copy of the practice run.** The practice was scored on a copy of the
    practice run of 2026-10-16, so that run stays as it was.
-6. **Helper scripts outside the harness.** The harness has no command that
-   builds a notes prompt, the accept-or-reject prompt or the notes file, so
-   three short scripts did; each notes prompt held only the 3 packets the
-   raters scored differently, where rule 7 leaves out alike packets only as
-   far as needed to fit.
+6. **Helper scripts outside the harness.** Three short scripts built the
+   notes prompts, the accept-or-reject prompts and the notes file, and each
+   notes prompt left out all 12 packets the raters scored alike, where rule
+   7 leaves out only as many as it takes to fit.
 7. **Labels.** The combined list numbered its notes C1 to C20, which reuses
    the rubric's names for criteria 1 to 5; the notes file carries no
    labels, so no scored prompt has the clash.
@@ -127,11 +128,16 @@ Part 2 §2 asks the result to say this. The coordinating session kept the
 record as it went; the entries before 2026-11-20 are as the deviation and
 the sessions themselves gave them.
 
-**Before the seal opened, no session opened a scored packet, a scored
-prompt, a scored answer, a score sheet, the seal, the judge's answers, a
+**Before the seal opened, no session opened a scored packet file, a scored
+prompt, an answer file, a score sheet, the seal, the judge's answers, a
 transcript, the packets file or the run's report.** Only each rater's fresh
 runs read scored packets, one prompt each. Where a command's progress lines
 named packet IDs, the coordinating session hid them before they were shown.
+
+A run hands its answer back to the session that started it. So each
+rater's session did hold its own rater's answers while scoring went on:
+the scores, with a line on each memo, by packet ID and never by arm. Rule 4
+allows that. No session opened the other rater's answers or sheet.
 
 | When | Who | What it read or did |
 |---|---|---|
@@ -140,7 +146,7 @@ named packet IDs, the coordinating session hid them before they were shown.
 | 2026-11-10 | A planning session | Listed the names, sizes and dates of the files in the experiment's folder, the scored run's folder and the scored window's five folders; opened none |
 | 2026-11-20, 21:35 to 21:50 | The coordinating session | Listed names, sizes and dates in the experiment's folders, the scored window's `raters` folder included: two packet files, no sheet. Opened none. Made the raters' empty folders and the copy of the practice run. Tallied, over other sessions' run records on the same machine, the kinds of text Claude Code adds; printed no message |
 | 2026-11-20, 22:06 | The coordinating session | On the maintainer's word, started both raters' sessions |
-| 2026-11-20, 22:15 to 22:55 | The coordinating session | Checked the two refused practice records, printing only pass or refusal, the set-up and tool names; opened #1140 |
+| 2026-11-20, 22:15 to 22:55 | Both raters, the coordinating session | Each rater held its first practice run, and `rater-enter` refused both at 22:17. From the two records the coordinating session printed only the kinds of added text, the version, the model, pass or refusal, the set-up and tool names. It opened #1140 |
 | 2026-11-20, 22:30 to 22:45 | The session that reviewed #1140, on `claude-fable-5-2` | Tallied 217 run records by kind, version and tool name; checked the two refused practice records the same way; listed names and sizes in the two raters' folders. Nothing in the scored run |
 | 2026-11-20, 23:26 to 23:29 | The maintainer, then rater 1 | #1140 merged. Rater 1 entered both practice batches. Then nothing happened until 2026-11-26 |
 | 2026-11-21, Sydney time | A planning session | Listed branch and worktree names and searched other sessions' transcripts for two phrases, reading the matching snippets only. One quoted a line saying the scored run was complete. Opened no file in the experiment's folders |
@@ -148,11 +154,11 @@ named packet IDs, the coordinating session hid them before they were shown.
 | 2026-11-26, 11:34 to 11:35 | The coordinating session | Listed names, sizes and dates again: no sheet, seal shut. Ran `score` without `--open`, which wrote both blank sheets; its packet IDs were hidden |
 | 2026-11-26, 11:35 to 11:43 | Rater 2, both raters, the coordinating session | The rest of the practice was entered and both notes runs kept. The coordinating session read the four kept notes answers, which are practice material, and wrote the combined list and the notes file |
 | 2026-11-26, 11:43 to 11:44 | Both raters, the coordinating session | Each rater wrote its 18 scored prompts with `rater-batches` and opened none. `rater-same-notes` passed |
-| 2026-11-26, 11:46 to 12:17 | Both raters' runs | Scored every packet: 18 runs each, each reading one prompt |
-| 2026-11-26, 12:16 to 12:22 | The coordinating session | Read both scored `runs.jsonl` files for counts, batch names, times and set-up, not packet IDs. Ran `rater-audit`, `score` without `--open` and `rater-ready`, with ID and cell lists hidden. Wrote its report and asked the maintainer for the word |
+| 2026-11-26, 11:44 to 12:17 | Both raters and their runs | Scored every packet: 18 runs each, each reading one prompt. Each rater's session then ran `rater-audit`, which listed nothing |
+| 2026-11-26, 12:16 to 12:22 | The coordinating session | Read both scored `runs.jsonl` files for counts, batch names, times and set-up, not packet IDs. Ran `rater-audit` again, `score` without `--open` and `rater-ready`, with ID and cell lists hidden. Wrote its report and asked the maintainer for the word |
 | 2026-11-26, 19:41 and 19:45 | The "next steps" session | Listed file names and dates in the scored run's and the raters' folders, and read the coordinating session's report and last 14 messages. Opened no packet, prompt, answer, sheet, record, judge file or seal. Passed on the maintainer's word to open |
 | 2026-11-26, 19:45 to 19:48 | The coordinating session, the maintainer | The session held the seal until the maintainer typed the word in that session itself. At 19:48:29 it ran `score --open`. It read the printed result and gave it to the maintainer. It told the "next steps" session only that the seal was open and on time |
-| 2026-11-27 | The session that wrote this result, on `claude-fable-5-2` | With the seal open: read the result files, the run's report, the raters' logs and notes and the coordinating session's record; searched the transcripts and the raters' published records for failures and for private details; scored a copy of the run again as a cross-check |
+| 2026-11-27 | The session that wrote this result, on `claude-fable-5-2` | With the seal open: read the result files, the run's report, the raters' logs and notes, the two refused practice runs' public records and the coordinating session's record; searched the transcripts and the raters' published records for failures and for private details; scored a copy of the run again as a cross-check |
 
 This record is the sessions' own. It holds no entry of the maintainer
 opening a file of the scored run before the seal opened. From 2026-11-26 at
@@ -180,8 +186,9 @@ full record, unpublished; `runs.jsonl` holds each one's SHA-256.
 
 ## Related documentation
 
-- [EXP-001 result](EXP-001-result.md) — the rule, the figures and what is
-  published.
+- [EXP-001 result](EXP-001-result.md) — the rule and the figures.
+- [What changed, and what is published](EXP-001-result-changes.md) — the
+  result's third part.
 - [Deviation: two AI raters](EXP-001-deviation-ai-raters.md) — the rater
   rules this part reports against.
 - [The harness, third part](EXP-001-harness-scoring.md) — the AI raters'

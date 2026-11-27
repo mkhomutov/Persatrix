@@ -1,9 +1,13 @@
 # EXP-001 — The scored run's records
 
 These are the records published with the
-[EXP-001 result](../../../../docs/experiments/EXP-001-result.md). Each file is
+[EXP-001 result](../../../../docs/experiments/EXP-001-result.md), whose
+[third part](../../../../docs/experiments/EXP-001-result-changes.md) lists
+them. Each file is
 a byte-for-byte copy of what the harness or a rater's session wrote during
-the run. Nothing here is edited by hand, and nothing here is changed later.
+the run. One was put together by the coordinating session: `notes.md`,
+word for word from the two raters' kept answers. Nothing here is edited by
+hand, and nothing here is changed later.
 
 The run's own files stayed outside the repository until every score was in,
 as the pre-registration asks. They were copied here on 2026-11-27, after
