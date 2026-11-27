@@ -243,8 +243,9 @@ The [third part](EXP-001-result-changes.md) lists both in full. In short:
   it, and the AI raters' prompts, answers, public records and logs, all
   under
   [`evaluators/experiments/EXP-001/runs/`](../../evaluators/experiments/EXP-001/runs/README.md).
-  The public records of two refused practice runs are held back until the
-  maintainer has read them.
+  The maintainer read the public records of the two refused practice runs
+  on 2026-11-27, before they were published, as rule 6 of the deviation
+  asks.
 - **A cross-check.** Scored again from a copy, the run gave the same
   result, byte for byte
   ([how](EXP-001-result-changes.md#2-what-is-published-with-this-result)).

@@ -159,6 +159,7 @@ allows that. No session opened the other rater's answers or sheet.
 | 2026-11-26, 19:41 and 19:45 | The "next steps" session | Listed file names and dates in the scored run's and the raters' folders, and read the coordinating session's report and last 14 messages. Opened no packet, prompt, answer, sheet, record, judge file or seal. Passed on the maintainer's word to open |
 | 2026-11-26, 19:45 to 19:48 | The coordinating session, the maintainer | The session held the seal until the maintainer typed the word in that session itself. At 19:48:29 it ran `score --open`. It read the printed result and gave it to the maintainer. It told the "next steps" session only that the seal was open and on time |
 | 2026-11-27 | The session that wrote this result, on `claude-fable-5-2` | With the seal open: read the result files, the run's report, the raters' logs and notes, the two refused practice runs' public records and the coordinating session's record; searched the transcripts and the raters' published records for failures and for private details; scored a copy of the run again as a cross-check |
+| 2026-11-27 | The maintainer, then the session that wrote this result | The maintainer said in that session that both refused practice runs' public records were read, and gave the word to publish them. The session then copied both in, checked each against the SHA-256 its `runs.jsonl` line holds, and searched both for private details |
 
 This record is the sessions' own. It holds no entry of the maintainer
 opening a file of the scored run before the seal opened. From 2026-11-26 at
@@ -180,9 +181,13 @@ them found no other private detail.
 Each prompt and each public record was checked against the SHA-256 its
 `runs.jsonl` line holds, for all 46 runs. All match.
 
-The public records of the two refused practice runs are held back until the
-maintainer has read them, as rule 6 asks. The maintainer keeps every run's
-full record, unpublished; `runs.jsonl` holds each one's SHA-256.
+The public records of the two refused practice runs are among them. Rule 6
+has the maintainer read a refused run's copy before it is published. The
+maintainer read both on 2026-11-27 and gave the word to publish them. A
+refused run has no answer file, because its answer was never entered.
+
+The maintainer keeps every run's full record, unpublished; `runs.jsonl`
+holds each one's SHA-256.
 
 ## Related documentation
 

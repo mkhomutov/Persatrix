@@ -44,10 +44,12 @@ rater 2. Each has a `practice/`, a `notes/` and a `scored/` folder.
 These files name the maintainer's home folder, in each brief's path and in
 `runs.jsonl`. The deviation says so in advance.
 
-Two files are not here yet: `person-1/practice/batch-01.run-1.public.jsonl`
-and `person-2/practice/batch-01.run-1.public.jsonl`, the public records of
-the two refused practice runs. Rule 6 has the maintainer read a refused
-run's copy before it is published.
+Two records have no answer beside them:
+`person-1/practice/batch-01.run-1.public.jsonl` and
+`person-2/practice/batch-01.run-1.public.jsonl`, the public records of the
+two refused practice runs. A refused run's answer is never entered. Rule 6
+has the maintainer read a refused run's copy before it is published, and
+the maintainer read both on 2026-11-27.
 
 ## What is not here
 

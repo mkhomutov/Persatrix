@@ -103,9 +103,9 @@ copied byte for byte from the run's own files:
   [notes](../../evaluators/experiments/EXP-001/runs/ai-raters/notes.md)
   both raters accepted in practice.
 
-Two files are held back: the public records of the two refused practice
-runs. Rule 6 has the maintainer read a refused run's copy before it is
-published.
+The public records of the two refused practice runs are among them. Rule 6
+has the maintainer read a refused run's copy before it is published, and
+the maintainer read both on 2026-11-27.
 
 The maintainer keeps the rest unpublished: each run's full record, the
 advisers' stores and logs, the per-call logs, the packets file, the seal,
