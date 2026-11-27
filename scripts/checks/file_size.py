@@ -123,6 +123,15 @@ _EXTRA_EXCLUDES = [
     # test_release_evidence_exclusion_stays_narrow pins the rest.
     "docs/manual-tests/v[0-9]*-execution-report.md",
     "docs/v[0-9]*-release-checklist.md",
+    # An experiment's published run records: what the run itself wrote, such
+    # as a rater's prompt of up to eight packets, copied byte for byte when
+    # the result is published and never edited after. A copy cannot be split
+    # or shortened, so the prose cap has nothing to do there. The pattern
+    # needs a folder below ``runs/``, so the hand-written page that describes
+    # the records, ``runs/README.md``, stays capped, and so does everything
+    # else in the experiment's materials
+    # (test_experiment_run_records_exclusion_stays_narrow).
+    "evaluators/experiments/*/runs/*/*",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES

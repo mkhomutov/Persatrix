@@ -212,6 +212,44 @@ def test_release_evidence_exclusion_stays_narrow(tmp_path: Path) -> None:
         assert rel in flagged, f"{rel} must still be capped"
 
 
+def test_experiment_run_records_are_excluded_from_the_scan(tmp_path: Path) -> None:
+    """An experiment's published run records are never scanned.
+
+    They are what a run wrote, copied byte for byte when its result is
+    published: a rater's prompt is a Markdown file of up to eight packets,
+    far over the prose cap, and it can never be split or shortened. Uses an
+    invented experiment to prove the pattern is not one experiment's list.
+    """
+    record = "evaluators/experiments/EXP-999/runs/ai-raters/person-1/scored/batch-01.md"
+    _write(tmp_path, record, DEFAULT_MAX_DOC_WORDS + 50)
+
+    assert record not in _measured(tmp_path)
+
+
+def test_experiment_run_records_exclusion_stays_narrow(tmp_path: Path) -> None:
+    """Only the records under ``runs/`` escape the cap, not prose near them.
+
+    Three neighbours are written by hand and stay capped: the page that
+    describes the records, which sits in ``runs/`` itself; any other
+    document in the experiment's materials; and the result, under
+    ``docs/experiments/``.
+    """
+    neighbours = (
+        "evaluators/experiments/EXP-999/runs/README.md",
+        "evaluators/experiments/EXP-999/notes.md",
+        "docs/experiments/EXP-999-result.md",
+    )
+    for rel in neighbours:
+        _write(tmp_path, rel, DEFAULT_MAX_DOC_WORDS + 50)
+
+    measured = _measured(tmp_path)
+    flagged = {w.file for w in _scan_files(tmp_path)[0]}
+
+    for rel in neighbours:
+        assert rel in measured, f"{rel} must still be scanned"
+        assert rel in flagged, f"{rel} must still be capped"
+
+
 # --------------------------------------------------------------------------
 # Allowlist hygiene (live repo)
 # --------------------------------------------------------------------------

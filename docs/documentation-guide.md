@@ -136,7 +136,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Prompt assets | `docs/prompt-organization.md` |
 | Open-core licence tiers | `docs/open-core-reserved-seams.md` (policy in RFC 0045) |
 | Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; what the four September reviews found, how their disagreements were settled, and the five checks the synthesis added in `docs/project-strategy-four-reviews.md`; numbers and commands in `docs/project-strategy-evidence.md` |
-| Pre-registered experiments (materials, arms, scoring, result) | `docs/experiments/EXP-NNN-*.md`; materials in `evaluators/experiments/EXP-NNN/` |
+| Pre-registered experiments (materials, arms, scoring, result) | `docs/experiments/EXP-NNN-*.md`; materials in `evaluators/experiments/EXP-NNN/`, and a run's published records in its `runs/` folder |
 | Companion discussion documents (spawn RFCs, own no code) | `docs/memory-quality-roadmap.md`, `docs/storage-architecture-roadmap.md`, `docs/agent-runtime-vocabulary-roadmap.md`, `docs/memory-scope-axes.md` |
 | Branching, commits, PR titles | `docs/BRANCHING.md` |
 | Agent configuration | `config/agents.yaml` |
@@ -156,7 +156,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Manual tests | `docs/manual-tests/MT-*.md` | Live; versioned (`v1.1`, `v1.2`) when a leg changes | `templates/MANUAL_TEST_TEMPLATE.md` |
 | Version-cycle documents | `docs/vX.Y.Z-plan.md`, the one document of a patch release since ruling (e) of the sequencing Amendment 2026-09-12; v0.3.16 and earlier also wrote `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen once the tag PR dates the changelog**, except for the Released stamp | `templates/VERSION_PLAN_TEMPLATE.md` |
 | Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after | `templates/EXECUTION_REPORT_TEMPLATE.md` |
-| Experiments | `docs/experiments/EXP-NNN-preregistration*.md` and `EXP-NNN-result.md`, the path strategy §4 names | The arms, the scoring and the decision arithmetic freeze when the pre-registration merges; the materials, the harness mechanics and the spend caps change only through a PR that says why, until the first scored meeting; the result is written once | — |
+| Experiments | `docs/experiments/EXP-NNN-preregistration*.md` and `EXP-NNN-result*.md`, the path strategy §4 names; a run's records in `evaluators/experiments/EXP-NNN/runs/` | The arms, the scoring and the decision arithmetic freeze when the pre-registration merges; the materials, the harness mechanics and the spend caps change only through a PR that says why, until the first scored meeting; the result is written once, and the run's records are copied in with it byte for byte and never edited | — |
 
 **Archival rule.** A version-cycle document is *archived* when its version has
 shipped — the changelog carries its dated section and the tag PR has
@@ -236,7 +236,8 @@ The checker also prints a **near-cap** notice for files within 3 % of their
 limit — for code, the last 24 lines under 800. Files that already exceeded a
 cap when the gate was introduced are listed in
 `scripts/checks/file_size_allowlist.py`, each with a reason and an exit
-condition; execution reports, checklists, generated indexes, and the
-notices file are excluded by pattern because their length is data, not prose.
+condition; execution reports, checklists, generated indexes, the notices
+file and an experiment's published run records are excluded by pattern
+because their length is data, not prose.
 Which of these rules are enforced, and where, is in the
 [enforcement matrix's documents half](methodology/enforcement-matrix-documents.md).

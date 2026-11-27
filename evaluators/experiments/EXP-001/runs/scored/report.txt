@@ -1,0 +1,182 @@
+EXP-001 scored run on anthropic claude-sonnet-4-6: complete
+
+Windows:
+  window 1: its meetings ended at 2026-11-06T18:12:29.553065+00:00; opened 2026-11-05T19:19:13.492872+00:00; $44.09 real spend
+
+Real spend: $44.09 of the $150 cap, every window counted
+
+Series kept: series-1, series-2, series-3, series-4, series-5; dropped: none; not held: none
+
+Meetings:
+  series-1 A series-1-briefing, attempt 1, try 1: held
+  series-1 A series-1-plan-1, attempt 1, try 1: held
+  series-1 A series-1-plan-2, attempt 1, try 1: held
+  series-1 A series-1-plan-3, attempt 1, try 1: held
+  series-1 A series-1-plan-4, attempt 1, try 1: held
+  series-1 A series-1-recall, attempt 1, try 1: held
+  series-1 C series-1-briefing, attempt 1, try 1: closed by idle
+  series-1 C series-1-plan-1, attempt 1, try 1: closed by depth_cap
+  series-1 C series-1-plan-2, attempt 1, try 1: closed by idle
+  series-1 C series-1-plan-3, attempt 1, try 1: closed by idle
+  series-1 C series-1-plan-4, attempt 1, try 1: closed by idle
+  series-1 C series-1-recall, attempt 1, try 1: closed by depth_cap
+  series-1 D series-1-briefing, attempt 1, try 1: closed by idle
+  series-1 D series-1-plan-1, attempt 1, try 1: closed by idle
+  series-1 D series-1-plan-2, attempt 1, try 1: closed by idle
+  series-1 D series-1-plan-3, attempt 1, try 1: closed by idle
+  series-1 D series-1-plan-4, attempt 1, try 1: closed by idle
+  series-1 D series-1-recall, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-briefing, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-plan-1, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-plan-2, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-plan-3, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-plan-4, attempt 1, try 1: closed by idle
+  series-1 D-prime series-1-recall, attempt 1, try 1: closed by idle
+  series-1 B series-1-briefing, attempt 1, try 1: closed by idle
+  series-1 B series-1-plan-1, attempt 1, try 1: closed by idle
+  series-1 B series-1-plan-2, attempt 1, try 1: closed by idle
+  series-1 B series-1-plan-3, attempt 1, try 1: closed by depth_cap
+  series-1 B series-1-plan-4, attempt 1, try 1: closed by depth_cap
+  series-1 B series-1-recall, attempt 1, try 1: closed by depth_cap
+  series-2 D-prime series-2-briefing, attempt 1, try 1: closed by depth_cap
+  series-2 D-prime series-2-plan-1, attempt 1, try 1: closed by idle
+  series-2 D-prime series-2-plan-2, attempt 1, try 1: closed by depth_cap
+  series-2 D-prime series-2-plan-3, attempt 1, try 1: closed by idle
+  series-2 D-prime series-2-plan-4, attempt 1, try 1: closed by idle
+  series-2 D-prime series-2-recall, attempt 1, try 1: closed by idle
+  series-2 D series-2-briefing, attempt 1, try 1: closed by idle
+  series-2 D series-2-plan-1, attempt 1, try 1: closed by idle
+  series-2 D series-2-plan-2, attempt 1, try 1: closed by idle
+  series-2 D series-2-plan-3, attempt 1, try 1: closed by idle
+  series-2 D series-2-plan-4, attempt 1, try 1: closed by idle
+  series-2 D series-2-recall, attempt 1, try 1: closed by idle
+  series-2 C series-2-briefing, attempt 1, try 1: closed by idle
+  series-2 C series-2-plan-1, attempt 1, try 1: closed by idle
+  series-2 C series-2-plan-2, attempt 1, try 1: closed by idle
+  series-2 C series-2-plan-3, attempt 1, try 1: closed by depth_cap
+  series-2 C series-2-plan-4, attempt 1, try 1: closed by depth_cap
+  series-2 C series-2-recall, attempt 1, try 1: closed by idle
+  series-2 B series-2-briefing, attempt 1, try 1: closed by idle
+  series-2 B series-2-plan-1, attempt 1, try 1: closed by idle
+  series-2 B series-2-plan-2, attempt 1, try 1: closed by idle
+  series-2 B series-2-plan-3, attempt 1, try 1: closed by depth_cap
+  series-2 B series-2-plan-4, attempt 1, try 1: closed by depth_cap
+  series-2 B series-2-recall, attempt 1, try 1: closed by depth_cap
+  series-2 A series-2-briefing, attempt 1, try 1: held
+  series-2 A series-2-plan-1, attempt 1, try 1: held
+  series-2 A series-2-plan-2, attempt 1, try 1: held
+  series-2 A series-2-plan-3, attempt 1, try 1: held
+  series-2 A series-2-plan-4, attempt 1, try 1: held
+  series-2 A series-2-recall, attempt 1, try 1: held
+  series-3 B series-3-briefing, attempt 1, try 1: closed by depth_cap
+  series-3 B series-3-plan-1, attempt 1, try 1: closed by depth_cap
+  series-3 B series-3-plan-2, attempt 1, try 1: closed by depth_cap
+  series-3 B series-3-plan-3, attempt 1, try 1: closed by idle
+  series-3 B series-3-plan-4, attempt 1, try 1: closed by depth_cap
+  series-3 B series-3-recall, attempt 1, try 1: closed by depth_cap
+  series-3 A series-3-briefing, attempt 1, try 1: held
+  series-3 A series-3-plan-1, attempt 1, try 1: held
+  series-3 A series-3-plan-2, attempt 1, try 1: held
+  series-3 A series-3-plan-3, attempt 1, try 1: held
+  series-3 A series-3-plan-4, attempt 1, try 1: held
+  series-3 A series-3-recall, attempt 1, try 1: held
+  series-3 C series-3-briefing, attempt 1, try 1: closed by depth_cap
+  series-3 C series-3-plan-1, attempt 1, try 1: closed by idle
+  series-3 C series-3-plan-2, attempt 1, try 1: closed by depth_cap
+  series-3 C series-3-plan-3, attempt 1, try 1: closed by idle
+  series-3 C series-3-plan-4, attempt 1, try 1: closed by depth_cap
+  series-3 C series-3-recall, attempt 1, try 1: closed by idle
+  series-3 D series-3-briefing, attempt 1, try 1: closed by idle
+  series-3 D series-3-plan-1, attempt 1, try 1: closed by idle
+  series-3 D series-3-plan-2, attempt 1, try 1: closed by idle
+  series-3 D series-3-plan-3, attempt 1, try 1: closed by idle
+  series-3 D series-3-plan-4, attempt 1, try 1: closed by idle
+  series-3 D series-3-recall, attempt 1, try 1: closed by idle
+  series-3 D-prime series-3-briefing, attempt 1, try 1: closed by depth_cap
+  series-3 D-prime series-3-plan-1, attempt 1, try 1: closed by idle
+  series-3 D-prime series-3-plan-2, attempt 1, try 1: closed by idle
+  series-3 D-prime series-3-plan-3, attempt 1, try 1: closed by idle
+  series-3 D-prime series-3-plan-4, attempt 1, try 1: closed by idle
+  series-3 D-prime series-3-recall, attempt 1, try 1: closed by idle
+  series-4 C series-4-briefing, attempt 1, try 1: closed by idle
+  series-4 C series-4-plan-1, attempt 1, try 1: closed by idle
+  series-4 C series-4-plan-2, attempt 1, try 1: closed by idle
+  series-4 C series-4-plan-3, attempt 1, try 1: closed by depth_cap
+  series-4 C series-4-plan-4, attempt 1, try 1: closed by idle
+  series-4 C series-4-recall, attempt 1, try 1: closed by depth_cap
+  series-4 A series-4-briefing, attempt 1, try 1: held
+  series-4 A series-4-plan-1, attempt 1, try 1: held
+  series-4 A series-4-plan-2, attempt 1, try 1: held
+  series-4 A series-4-plan-3, attempt 1, try 1: held
+  series-4 A series-4-plan-4, attempt 1, try 1: held
+  series-4 A series-4-recall, attempt 1, try 1: held
+  series-4 B series-4-briefing, attempt 1, try 1: closed by depth_cap
+  series-4 B series-4-plan-1, attempt 1, try 1: closed by depth_cap
+  series-4 B series-4-plan-2, attempt 1, try 1: closed by idle
+  series-4 B series-4-plan-3, attempt 1, try 1: closed by depth_cap
+  series-4 B series-4-plan-4, attempt 1, try 1: closed by depth_cap
+  series-4 B series-4-recall, attempt 1, try 1: closed by depth_cap
+  series-4 D series-4-briefing, attempt 1, try 1: closed by idle
+  series-4 D series-4-plan-1, attempt 1, try 1: closed by idle
+  series-4 D series-4-plan-2, attempt 1, try 1: closed by idle
+  series-4 D series-4-plan-3, attempt 1, try 1: closed by idle
+  series-4 D series-4-plan-4, attempt 1, try 1: closed by idle
+  series-4 D series-4-recall, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-briefing, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-plan-1, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-plan-2, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-plan-3, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-plan-4, attempt 1, try 1: closed by idle
+  series-4 D-prime series-4-recall, attempt 1, try 1: closed by idle
+  series-5 C series-5-briefing, attempt 1, try 1: closed by idle
+  series-5 C series-5-plan-1, attempt 1, try 1: closed by depth_cap
+  series-5 C series-5-plan-2, attempt 1, try 1: closed by idle
+  series-5 C series-5-plan-3, attempt 1, try 1: closed by idle
+  series-5 C series-5-plan-4, attempt 1, try 1: closed by idle
+  series-5 C series-5-recall, attempt 1, try 1: closed by depth_cap
+  series-5 B series-5-briefing, attempt 1, try 1: closed by depth_cap
+  series-5 B series-5-plan-1, attempt 1, try 1: closed by depth_cap
+  series-5 B series-5-plan-2, attempt 1, try 1: closed by idle
+  series-5 B series-5-plan-3, attempt 1, try 1: closed by idle
+  series-5 B series-5-plan-4, attempt 1, try 1: closed by idle
+  series-5 B series-5-recall, attempt 1, try 1: closed by depth_cap
+  series-5 D series-5-briefing, attempt 1, try 1: closed by idle
+  series-5 D series-5-plan-1, attempt 1, try 1: closed by depth_cap
+  series-5 D series-5-plan-2, attempt 1, try 1: closed by idle
+  series-5 D series-5-plan-3, attempt 1, try 1: closed by idle
+  series-5 D series-5-plan-4, attempt 1, try 1: closed by idle
+  series-5 D series-5-recall, attempt 1, try 1: closed by idle
+  series-5 D-prime series-5-briefing, attempt 1, try 1: closed by idle
+  series-5 D-prime series-5-plan-1, attempt 1, try 1: closed by idle
+  series-5 D-prime series-5-plan-2, attempt 1, try 1: closed by idle
+  series-5 D-prime series-5-plan-3, attempt 1, try 1: closed by depth_cap
+  series-5 D-prime series-5-plan-4, attempt 1, try 1: closed by idle
+  series-5 D-prime series-5-recall, attempt 1, try 1: closed by idle
+  series-5 A series-5-briefing, attempt 1, try 1: held
+  series-5 A series-5-plan-1, attempt 1, try 1: held
+  series-5 A series-5-plan-2, attempt 1, try 1: held
+  series-5 A series-5-plan-3, attempt 1, try 1: held
+  series-5 A series-5-plan-4, attempt 1, try 1: held
+  series-5 A series-5-recall, attempt 1, try 1: held
+
+Dollars per plan, at the fixed table:
+  A: series-1 $0.0139, series-2 $0.0139, series-3 $0.0136, series-4 $0.0134, series-5 $0.0135
+  C: series-1 $0.3805, series-2 $0.3548, series-3 $0.3641, series-4 $0.3436, series-5 $0.3221
+  D: series-1 $0.3473, series-2 $0.4449, series-3 $0.4318, series-4 $0.4349, series-5 $0.3457
+  D-prime: series-1 $0.3508, series-2 $0.3682, series-3 $0.4025, series-4 $0.3188, series-5 $0.3524
+  B: series-1 $0.4729, series-2 $0.4498, series-3 $0.5391, series-4 $0.5298, series-5 $0.3729
+
+Dollars per plan, bids and memory summaries repriced at claude-haiku-4-5:
+  A: series-1 $0.0139, series-2 $0.0139, series-3 $0.0136, series-4 $0.0134, series-5 $0.0135
+  C: series-1 $0.3337, series-2 $0.3205, series-3 $0.3228, series-4 $0.3029, series-5 $0.2930
+  D: series-1 $0.2862, series-2 $0.3505, series-3 $0.3532, series-4 $0.3374, series-5 $0.2899
+  D-prime: series-1 $0.3201, series-2 $0.3508, series-3 $0.3499, series-4 $0.2917, series-5 $0.3238
+  B: series-1 $0.4729, series-2 $0.4498, series-3 $0.5391, series-4 $0.5298, series-5 $0.3729
+
+The judge: 125 calls, 0 failed; spend $4.44 of its $25 cap; output tokens up to 2 171
+Scoring: the last scored meeting ended at 2026-11-06T18:12:29.553065+00:00; scoring is due by 2026-11-27T18:12:29.553065+00:00
+
+Usage, to compare with the provider's report for this run's API key:
+  from 2026-11-05T19:19:13.495503+00:00 to 2026-11-06T18:39:53.286376+00:00
+  claude-opus-5: 125 calls; input 343 327, output 108 735, cache write 0, cache read 0 tokens; $4.4350
+  claude-sonnet-4-6: 3 527 calls; input 9 588 802, output 881 876, cache write 295 624, cache read 3 297 341 tokens; $44.0923
