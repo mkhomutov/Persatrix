@@ -233,10 +233,10 @@ not by this file.
 
 ## Related documentation
 
-- [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full.
+- [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full, and
+  the four reviews' recommendation ledger.
 - [Evidence companion](project-strategy-evidence.md) — the commands behind
-  most numbers, the four reviews' recommendation ledger, and the perishable
-  market claims.
+  most numbers, and the perishable market claims.
 - [v0.3.x sequencing](v0.3.x-sequencing.md) — the amendments the §10 log
   cites.
 - [Release cycle](methodology/release-cycle.md) and
