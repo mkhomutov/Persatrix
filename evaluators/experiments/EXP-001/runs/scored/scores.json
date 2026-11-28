@@ -1,0 +1,5272 @@
+{
+ "run": "scored",
+ "window": 1,
+ "opened_at": "2026-11-26T19:48:29.917795+00:00",
+ "scoring_due": "2026-11-27T18:12:29.553065+00:00",
+ "on_time": true,
+ "deviation": "docs/experiments/EXP-001-deviation-ai-raters.md",
+ "raters": [
+  "person-1",
+  "person-2",
+  "judge"
+ ],
+ "judge_cap_reached": false,
+ "series": [
+  "series-1",
+  "series-2",
+  "series-3",
+  "series-4",
+  "series-5"
+ ],
+ "outcome": "rule 1",
+ "why": null,
+ "agreement": {
+  "pairs": [
+   {
+    "raters": [
+     "person-1",
+     "person-2"
+    ],
+    "mean": 0.8779351030542286,
+    "plans_used": 19,
+    "plans_skipped": 1,
+    "pooled": 0.9499288157498874
+   },
+   {
+    "raters": [
+     "person-1",
+     "judge"
+    ],
+    "mean": 0.6563200144491044,
+    "plans_used": 18,
+    "plans_skipped": 2,
+    "pooled": 0.8465374825623423
+   },
+   {
+    "raters": [
+     "person-2",
+     "judge"
+    ],
+    "mean": 0.7901272416251647,
+    "plans_used": 18,
+    "plans_skipped": 2,
+    "pooled": 0.8898074838193091
+   }
+  ],
+  "mean": 0.7747941197094992,
+  "floor": 0.4,
+  "sufficient": true
+ },
+ "comparisons": [
+  {
+   "x": "C",
+   "y": "A",
+   "differences": [
+    -1.0958304166666661,
+    -1.0701294166666666,
+    -0.12130083333333319,
+    -1.080174,
+    -1.1003329166666673
+   ],
+   "interval": {
+    "mean": -0.8935535166666666,
+    "low": -1.4297076172091838,
+    "high": -0.3573994161241494
+   },
+   "beats": false,
+   "clearly_beats": false,
+   "deciding": true,
+   "verdict": {
+    "name": "clearly beats",
+    "holds": false
+   },
+   "price_range": [
+    [
+     0.0,
+     null
+    ]
+   ],
+   "repriced": {
+    "x": "C",
+    "y": "A",
+    "differences": [
+     -1.0489584166666663,
+     -1.0357839166666667,
+     -0.08001383333333312,
+     -1.0394305,
+     -1.071206416666667
+    ],
+    "interval": {
+     "mean": -0.8550786166666666,
+     "low": -1.3932454506637428,
+     "high": -0.3169117826695904
+    },
+    "beats": false,
+    "clearly_beats": false
+   }
+  },
+  {
+   "x": "D",
+   "y": "C",
+   "differences": [
+    0.17906058333333275,
+    1.2849047500000002,
+    -1.3594269166666664,
+    1.3670275833333323,
+    1.434717333333334
+   ],
+   "interval": {
+    "mean": 0.5812566666666665,
+    "low": -0.9096603049067236,
+    "high": 2.0721736382400566
+   },
+   "beats": false,
+   "clearly_beats": false,
+   "deciding": false,
+   "verdict": null,
+   "price_range": null,
+   "repriced": {
+    "x": "D",
+    "y": "C",
+    "differences": [
+     0.19327708333333327,
+     1.3449572500000002,
+     -1.3220829166666668,
+     1.4237915833333328,
+     1.4614168333333335
+    ],
+    "interval": {
+     "mean": 0.6202719666666666,
+     "low": -0.8789485067016479,
+     "high": 2.119492440034981
+    },
+    "beats": false,
+    "clearly_beats": false
+   }
+  },
+  {
+   "x": "D",
+   "y": "D-prime",
+   "differences": [
+    -0.8090205250000004,
+    -0.41008687083333295,
+    -2.1959614791666664,
+    0.17554589166666568,
+    -0.4308706749999993
+   ],
+   "interval": {
+    "mean": -0.7340787316666667,
+    "low": -1.8387454130747685,
+    "high": 0.37058794974143494
+   },
+   "beats": false,
+   "clearly_beats": false,
+   "deciding": false,
+   "verdict": null,
+   "price_range": null,
+   "repriced": {
+    "x": "D",
+    "y": "D-prime",
+    "differences": [
+     -0.7785785250000004,
+     -0.3330888708333333,
+     -2.1700019791666674,
+     0.24592389166666573,
+     -0.4036276749999992
+    ],
+    "interval": {
+     "mean": -0.687874631666667,
+     "low": -1.812681883109986,
+     "high": 0.4369326197766522
+    },
+    "beats": false,
+    "clearly_beats": false
+   }
+  },
+  {
+   "x": "B",
+   "y": "A",
+   "differences": [
+    -1.4590479999999997,
+    -0.8318150833333329,
+    -1.3171684166666666,
+    -1.26641475,
+    -0.25526483333333405
+   ],
+   "interval": {
+    "mean": -1.0259422166666667,
+    "low": -1.634718868400875,
+    "high": -0.4171655649324584
+   },
+   "beats": false,
+   "clearly_beats": false,
+   "deciding": false,
+   "verdict": null,
+   "price_range": null,
+   "repriced": {
+    "x": "B",
+    "y": "A",
+    "differences": [
+     -1.4590479999999997,
+     -0.8318150833333329,
+     -1.3171684166666666,
+     -1.26641475,
+     -0.25526483333333405
+    ],
+    "interval": {
+     "mean": -1.0259422166666667,
+     "low": -1.634718868400875,
+     "high": -0.4171655649324584
+    },
+    "beats": false,
+    "clearly_beats": false
+   }
+  },
+  {
+   "x": "C",
+   "y": "B",
+   "differences": [
+    0.36321758333333354,
+    -0.23831433333333374,
+    1.1958675833333334,
+    0.18624075000000007,
+    -0.8450680833333333
+   ],
+   "interval": {
+    "mean": 0.1323887,
+    "low": -0.8048992128192891,
+    "high": 1.0696766128192892
+   },
+   "beats": false,
+   "clearly_beats": false,
+   "deciding": false,
+   "verdict": null,
+   "price_range": null,
+   "repriced": {
+    "x": "C",
+    "y": "B",
+    "differences": [
+     0.41008958333333334,
+     -0.20396883333333382,
+     1.2371545833333335,
+     0.2269842500000001,
+     -0.815941583333333
+    ],
+    "interval": {
+     "mean": 0.17086360000000003,
+     "low": -0.7729026866728841,
+     "high": 1.114629886672884
+    },
+    "beats": false,
+    "clearly_beats": false
+   }
+  }
+ ],
+ "repriced_outcome": "rule 1",
+ "people_alone": {
+  "outcome": "rule 1",
+  "why": null,
+  "agreement": 0.8779351030542286,
+  "checks": [
+   {
+    "x": "C",
+    "y": "A",
+    "beats": false,
+    "clearly_beats": false
+   }
+  ]
+ },
+ "arms": {
+  "A": {
+   "quality": 7.9375,
+   "plans_quality": 7.333333333333333,
+   "control_quality": 9.75,
+   "criteria": {
+    "C1": 1.9666666666666666,
+    "C2": 0.17777777777777778,
+    "C3": 2.0,
+    "C4": 2.0,
+    "C5": 1.35
+   },
+   "dollars_per_plan": 0.013642950000000001,
+   "dollars_per_plan_repriced": 0.013642950000000001,
+   "quality_per_dollar": 581.8023228114154,
+   "minutes_per_plan": 0.2553248908333333,
+   "minutes_left_out": 0,
+   "quality_per_minute": 31.0878425291536,
+   "recall": {
+    "right": 0,
+    "asked": 20
+   }
+  },
+  "B": {
+   "quality": 7.370833333333333,
+   "plans_quality": 6.8,
+   "control_quality": 9.083333333333334,
+   "criteria": {
+    "C1": 2.0,
+    "C2": 0.17777777777777778,
+    "C3": 2.0,
+    "C4": 1.9333333333333333,
+    "C5": 0.85
+   },
+   "dollars_per_plan": 0.4729185,
+   "dollars_per_plan_repriced": 0.4729185,
+   "quality_per_dollar": 15.585842662812583,
+   "minutes_per_plan": 7.953957148333333,
+   "minutes_left_out": 0,
+   "quality_per_minute": 0.9266875840383189,
+   "recall": {
+    "right": 0,
+    "asked": 20
+   }
+  },
+  "C": {
+   "quality": 7.383333333333333,
+   "plans_quality": 6.733333333333333,
+   "control_quality": 9.333333333333334,
+   "criteria": {
+    "C1": 2.0,
+    "C2": 0.2,
+    "C3": 2.0,
+    "C4": 1.95,
+    "C5": 0.8166666666666667
+   },
+   "dollars_per_plan": 0.3530298,
+   "dollars_per_plan_repriced": 0.31455489999999997,
+   "quality_per_dollar": 20.91419289060961,
+   "minutes_per_plan": 10.647767610833332,
+   "minutes_left_out": 0,
+   "quality_per_minute": 0.6934160852478904,
+   "recall": {
+    "right": 0,
+    "asked": 20
+   }
+  },
+  "D": {
+   "quality": 8.0125,
+   "plans_quality": 7.711111111111111,
+   "control_quality": 8.916666666666668,
+   "criteria": {
+    "C1": 1.8666666666666667,
+    "C2": 1.2666666666666666,
+    "C3": 1.9,
+    "C4": 1.8166666666666667,
+    "C5": 1.0333333333333334
+   },
+   "dollars_per_plan": 0.4009398,
+   "dollars_per_plan_repriced": 0.3234496,
+   "quality_per_dollar": 19.984296894446494,
+   "minutes_per_plan": 12.903307989999998,
+   "minutes_left_out": 0,
+   "quality_per_minute": 0.620964794935504,
+   "recall": {
+    "right": 16,
+    "asked": 20
+   }
+  },
+  "D-prime": {
+   "quality": 8.704166666666667,
+   "plans_quality": 8.466666666666667,
+   "control_quality": 9.416666666666668,
+   "criteria": {
+    "C1": 1.95,
+    "C2": 1.6666666666666667,
+    "C3": 1.8333333333333333,
+    "C4": 1.8666666666666667,
+    "C5": 1.3333333333333333
+   },
+   "dollars_per_plan": 0.358527735,
+   "dollars_per_plan_repriced": 0.327241635,
+   "quality_per_dollar": 24.277526720956935,
+   "minutes_per_plan": 12.4212829325,
+   "minutes_left_out": 0,
+   "quality_per_minute": 0.7007461881326619,
+   "recall": {
+    "right": 20,
+    "asked": 20
+   }
+  }
+ },
+ "memos": [
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "packet": "4017b23f",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.333333333333333
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "packet": "39832b6d",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "packet": "1c05f9de",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 8.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "packet": "7884f9ff",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "packet": "e8384e5d",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.333333333333333
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "packet": "3a575310",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 7.5
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "packet": "25542082",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "packet": "b1766b1b",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "packet": "5a0fd431",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "packet": "0a8bc978",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "packet": "69427a6c",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.0
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "packet": "9467f3d1",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "packet": "970e3c15",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "packet": "a2c8b0c5",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 7.5
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "packet": "055c5315",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 8.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "packet": "90651803",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "packet": "eb0595cc",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "packet": "e08d33f4",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 8.75
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "packet": "000c2bc0",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "packet": "6976b9aa",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 5.0
+   },
+   "quality": 5.666666666666667
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "packet": "21ba9ab8",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.333333333333333
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "packet": "551e9611",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "packet": "7d5de187",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 9.166666666666666
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "packet": "08a902c1",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "packet": "63038058",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 6.0
+   },
+   "quality": 7.333333333333333
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "packet": "9965451e",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "packet": "2403f0be",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 8.75
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "packet": "78c7369f",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "packet": "a82c1fc8",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "packet": "85aa70ac",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "packet": "51737192",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "packet": "3eb018e7",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "packet": "5af89a81",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "packet": "5b074f72",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "packet": "4863ac57",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "packet": "41560b5b",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 9.0
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "packet": "9cc0260e",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 8.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "packet": "1648ce9b",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "packet": "3cade545",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "packet": "85630192",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "packet": "43fd9b17",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "packet": "0c175d85",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 8.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "packet": "e5b1a2c9",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.333333333333333
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "packet": "85ba93c3",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "packet": "a2160188",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 6.0,
+    "judge": 7.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "packet": "77edefcc",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.0
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "packet": "2e562065",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "packet": "059fe6a2",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 9.166666666666666
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "packet": "862e37cb",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 8.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "packet": "637a033c",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "packet": "5ea8c48a",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "packet": "b3ec1abb",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "packet": "8ae36e49",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 10.0
+   },
+   "quality": 9.333333333333334
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "packet": "baa57815",
+   "missing": false,
+   "totals": {
+    "person-1": 2.0,
+    "person-2": 2.0,
+    "judge": 0.0
+   },
+   "quality": 1.3333333333333333
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "packet": "23f54e1a",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "packet": "fe612e69",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "packet": "eb99e07d",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "packet": "b5cbb62f",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 10.0
+   },
+   "quality": 9.333333333333334
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "packet": "ac5a5162",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "packet": "df639875",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "packet": "adc7b5dc",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "packet": "3684cb62",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 8.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "packet": "3e972ada",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.0
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "packet": "a88aa73a",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "packet": "d3150805",
+   "missing": false,
+   "totals": {
+    "person-1": 7.5,
+    "person-2": 7.5,
+    "judge": 10.0
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "packet": "87512fac",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "packet": "6830179d",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "packet": "9d475842",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "packet": "43b1005c",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "packet": "ee935011",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.0
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "packet": "dc42c1d7",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "packet": "5456e3c4",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "packet": "76eb5061",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 9.166666666666666
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "packet": "bcc1eafb",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 8.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "packet": "26cc935a",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 8.666666666666666
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "packet": "e7685e07",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 9.0
+   },
+   "quality": 9.666666666666666
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "packet": "3b92adac",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "packet": "4311473e",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 8.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "packet": "849e2a02",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 8.0
+   },
+   "quality": 8.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "packet": "a3270ceb",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 9.0
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "packet": "9240227b",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "packet": "3497af88",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "packet": "fa8dd40c",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 8.75
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "packet": "885bc9df",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "packet": "71474e9e",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "packet": "4a9c9b14",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "packet": "413843b3",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "packet": "0a445229",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 7.0
+   },
+   "quality": 7.666666666666667
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "packet": "75248767",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "packet": "5c25b629",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "packet": "7d48d712",
+   "missing": false,
+   "totals": {
+    "person-1": 8.75,
+    "person-2": 8.75,
+    "judge": 8.75
+   },
+   "quality": 8.75
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "packet": "680039b3",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 7.0
+   },
+   "quality": 7.0
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "packet": "efcf3efd",
+   "missing": false,
+   "totals": {
+    "person-1": 8.0,
+    "person-2": 8.0,
+    "judge": 9.0
+   },
+   "quality": 8.333333333333334
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "packet": "4bdcab00",
+   "missing": false,
+   "totals": {
+    "person-1": 6.0,
+    "person-2": 6.0,
+    "judge": 6.0
+   },
+   "quality": 6.0
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "packet": "5a93a33b",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 8.75
+   },
+   "quality": 9.583333333333334
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "packet": "786256f8",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 9.0
+   },
+   "quality": 9.666666666666666
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "packet": "677f1a7b",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 9.0
+   },
+   "quality": 9.666666666666666
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "packet": "14084eb5",
+   "missing": false,
+   "totals": {
+    "person-1": 7.0,
+    "person-2": 7.0,
+    "judge": 6.0
+   },
+   "quality": 6.666666666666667
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "packet": "58fec099",
+   "missing": false,
+   "totals": {
+    "person-1": 10.0,
+    "person-2": 10.0,
+    "judge": 10.0
+   },
+   "quality": 10.0
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "packet": "e0e347a7",
+   "missing": false,
+   "totals": {
+    "person-1": 9.0,
+    "person-2": 9.0,
+    "judge": 9.0
+   },
+   "quality": 9.0
+  }
+ ],
+ "recall": [
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "packet": "fc140f36",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "packet": "d5233c2f",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "packet": "6c26b338",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "packet": "e4df29d8",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "packet": "d8bfd5ad",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "packet": "f04c3622",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "packet": "4db1b260",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "packet": "5fad3c5e",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "packet": "63c3f42a",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "packet": "94479a56",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "packet": "876bb7c2",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "packet": "d070f059",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "packet": "998f8933",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "packet": "8a54c8a5",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": true
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "packet": "20e568cf",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "packet": "118d2ca5",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "packet": "2f352323",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "packet": "ac508831",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "packet": "c61984b5",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "packet": "bd341b06",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "packet": "3cb716ef",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "packet": "9e88baf9",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "packet": "1d2f9a12",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R2": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R3": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    },
+    "R4": {
+     "marks": {
+      "person-1": false,
+      "person-2": false,
+      "judge": false
+     },
+     "right": false
+    }
+   }
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "packet": "9b19f4b7",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "packet": "4483cce9",
+   "missing": false,
+   "questions": {
+    "R1": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R2": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R3": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    },
+    "R4": {
+     "marks": {
+      "person-1": true,
+      "person-2": true,
+      "judge": true
+     },
+     "right": true
+    }
+   }
+  }
+ ],
+ "meetings": [
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24916608333333334,
+   "words": 352,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.27576664999999995,
+   "words": 390,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.2599518333333333,
+   "words": 361,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.2596909,
+   "words": 385,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.317014983333333,
+   "words": 435,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.22991535,
+   "words": 428,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.8907392,
+   "words": 399,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 5.7361952,
+   "words": 395,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6999999999999997,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.6999999999999997,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 6.853415333333333,
+   "words": 387,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.376983783333333,
+   "words": 375,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": 16.181085166666666,
+   "words": 362,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.2120529,
+   "words": 403,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.424893383333334,
+   "words": 386,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.291776816666667,
+   "words": 422,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.401908100000002,
+   "words": 365,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.612436733333334,
+   "words": 380,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 16.759189866666667,
+   "words": 391,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-2",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.312649983333333,
+   "words": 437,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.131596016666666,
+   "words": 436,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.32981865,
+   "words": 444,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-1",
+   "meeting": "series-1-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.26388265,
+   "words": 370,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24749253333333332,
+   "words": 382,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.25317453333333334,
+   "words": 368,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.2622729,
+   "words": 378,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.277344566666667,
+   "words": 393,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.01975815,
+   "words": 392,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.7499999999999998
+   },
+   "minutes": 3.5491288333333335,
+   "words": 397,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.938748833333333,
+   "words": 379,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.6999999999999997,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.567901733333334,
+   "words": 439,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.194803383333333,
+   "words": 401,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": 6.1573299,
+   "words": 377,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 6.769477216666667,
+   "words": 380,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.362312733333333,
+   "words": 406,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.658884533333332,
+   "words": 392,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 16.681939,
+   "words": 366,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.689397600000001,
+   "words": 386,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.364628233333333,
+   "words": 397,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 5.0040249,
+   "words": 430,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.109943316666666,
+   "words": 403,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.215583966666665,
+   "words": 461,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-2",
+   "meeting": "series-2-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.27418641666666665,
+   "words": 382,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24677811666666666,
+   "words": 364,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.27524503333333333,
+   "words": 387,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.2456764,
+   "words": 386,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5499999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 5.021288183333334,
+   "words": 386,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.07053085,
+   "words": 388,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.3716054,
+   "words": 411,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 3.584557766666667,
+   "words": 389,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.6999999999999997,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.864505916666667,
+   "words": 402,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 6.360339783333333,
+   "words": 371,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.260509083333334,
+   "words": 390,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 4.0650066166666665,
+   "words": 393,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": null
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.486673866666667,
+   "words": 395,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.7999999999999998,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 16.696246666666667,
+   "words": 25,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.627047416666667,
+   "words": 395,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.06394135,
+   "words": 405,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": null
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.51489385,
+   "words": 380,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8499999999999999,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": 15.731049833333334,
+   "words": 400,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.502520183333333,
+   "words": 469,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-plan-4",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": 16.235299066666666,
+   "words": 465,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-3",
+   "meeting": "series-3-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": null
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.23390866666666668,
+   "words": 370,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.23947273333333333,
+   "words": 374,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24850988333333335,
+   "words": 374,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24484248333333333,
+   "words": 366,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.7499999999999998
+   },
+   "minutes": 3.2207566666666665,
+   "words": 376,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 11.946660183333334,
+   "words": 406,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6999999999999997,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.7499999999999998
+   },
+   "minutes": 4.5864523833333335,
+   "words": 412,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.7441891,
+   "words": 390,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.7499999999999998
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 13.069771633333334,
+   "words": 382,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.695733566666666,
+   "words": 403,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 5.307429733333334,
+   "words": 392,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.188253583333333,
+   "words": 389,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.331805133333335,
+   "words": 378,
+   "cut": false
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7499999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.7999999999999998,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.907138766666666,
+   "words": 414,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.626900433333333,
+   "words": 417,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.536005066666666,
+   "words": 414,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-1",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.395377716666667,
+   "words": 393,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 13.366559733333334,
+   "words": 435,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-3",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.506918466666667,
+   "words": 494,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 11.962447599999999,
+   "words": 436,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-4",
+   "meeting": "series-4-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.24486478333333334,
+   "words": 371,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.2615117833333333,
+   "words": 379,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.25137601666666665,
+   "words": 373,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": 0.26872741666666666,
+   "words": 375,
+   "cut": false
+  },
+  {
+   "arm": "A",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": null,
+   "energy": null,
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "depth_cap",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.5999999999999996,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.41429085,
+   "words": 393,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.448450366666666,
+   "words": 400,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 11.884786116666668,
+   "words": 404,
+   "cut": true
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.826729983333333,
+   "words": 389,
+   "cut": false
+  },
+  {
+   "arm": "B",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6999999999999997,
+    "velvet-pika": 0.7499999999999998,
+    "ripple-kite": 0.7499999999999998,
+    "crimson-crow": 0.7499999999999998
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.7999999999999998,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.7999999999999998
+   },
+   "minutes": 6.748389066666666,
+   "words": 372,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.380204016666665,
+   "words": 431,
+   "cut": true
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.10849945,
+   "words": 395,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 13.59366035,
+   "words": 373,
+   "cut": false
+  },
+  {
+   "arm": "C",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.6499999999999997,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.6999999999999997,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 5.3627309,
+   "words": 405,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.279113583333332,
+   "words": 405,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 11.97495125,
+   "words": 407,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.050056466666666,
+   "words": 408,
+   "cut": true
+  },
+  {
+   "arm": "D",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-briefing",
+   "kind": "briefing",
+   "recorded": true,
+   "answered": null,
+   "closed_by": "idle",
+   "energy": {},
+   "minutes": null,
+   "words": null,
+   "cut": null
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-1",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.8499999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 14.653647416666667,
+   "words": 378,
+   "cut": false
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-2",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.461745183333333,
+   "words": 429,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-3",
+   "kind": "control",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "depth_cap",
+   "energy": {
+    "lunar-stoat": 0.7999999999999998,
+    "velvet-pika": 0.6999999999999997,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.6999999999999997
+   },
+   "minutes": 4.57164035,
+   "words": 408,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-plan-4",
+   "kind": "plan",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8999999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": 12.296124316666667,
+   "words": 444,
+   "cut": true
+  },
+  {
+   "arm": "D-prime",
+   "series": "series-5",
+   "meeting": "series-5-recall",
+   "kind": "recall",
+   "recorded": true,
+   "answered": true,
+   "closed_by": "idle",
+   "energy": {
+    "lunar-stoat": 0.8499999999999999,
+    "velvet-pika": 0.8999999999999999,
+    "ripple-kite": 0.8999999999999999,
+    "crimson-crow": 0.8999999999999999
+   },
+   "minutes": null,
+   "words": null,
+   "cut": null
+  }
+ ]
+}

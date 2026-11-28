@@ -1,0 +1,37 @@
+{
+ "alias": {
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "input_per_1m_tokens": 3.0,
+  "output_per_1m_tokens": 15.0
+ },
+ "windows": [
+  {
+   "window": 1,
+   "fixed_by": null,
+   "opened_at": "2026-11-05T19:19:13.492872+00:00",
+   "fault": null,
+   "ended": {
+    "at": "2026-11-06T18:12:29.553065+00:00",
+    "last_scored_meeting_at": "2026-11-06T18:12:29.553065+00:00",
+    "kept": [
+     "series-1",
+     "series-2",
+     "series-3",
+     "series-4",
+     "series-5"
+    ],
+    "dropped": [],
+    "not_held": [],
+    "stopped_by": null
+   },
+   "last_try_ended": {
+    "series-1": "2026-11-06T00:11:19.021360+00:00",
+    "series-2": "2026-11-06T04:46:56.580191+00:00",
+    "series-3": "2026-11-06T09:13:29.792113+00:00",
+    "series-4": "2026-11-06T13:44:03.709048+00:00",
+    "series-5": "2026-11-06T18:12:29.553065+00:00"
+   }
+  }
+ ]
+}

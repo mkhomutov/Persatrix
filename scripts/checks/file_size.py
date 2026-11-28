@@ -123,6 +123,19 @@ _EXTRA_EXCLUDES = [
     # test_release_evidence_exclusion_stays_narrow pins the rest.
     "docs/manual-tests/v[0-9]*-execution-report.md",
     "docs/v[0-9]*-release-checklist.md",
+    # An experiment's published run records: what the run itself wrote, such
+    # as a rater's prompt of up to eight packets, copied byte for byte when
+    # the result is published and never edited after. A copy cannot be split
+    # or shortened, so the prose cap has nothing to do there. The pattern
+    # needs a folder below ``runs/`` and a Markdown file. So the hand-written
+    # page that describes the records, ``runs/README.md``, stays capped, and
+    # so does any code put beside them: this list feeds the code scan too
+    # (test_experiment_run_records_exclusion_stays_narrow). fnmatch's ``*``
+    # crosses ``/``, as above, so Markdown is exempt at any depth below a
+    # ``runs/`` subfolder, and below a ``runs/`` folder nested in the
+    # materials. Nothing hand-written belongs there
+    # (test_experiment_run_records_exclusion_crosses_folders).
+    "evaluators/experiments/*/runs/*/*.md",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
