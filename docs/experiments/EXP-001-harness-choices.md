@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices
 
-> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PRs 5d's and 5e's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), PR 6a's in [the judge](EXP-001-harness-choices-judge.md), PR 6b's in [the practice run](EXP-001-harness-choices-practice.md), and PR 6c's in [the scored run](EXP-001-harness-choices-scored.md).
-> **Last updated**: 2026-10-07
+> **Status**: ✅ **Implemented** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PRs 5d's and 5e's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), PR 6a's in [the judge](EXP-001-harness-choices-judge.md), PR 6b's in [the practice run](EXP-001-harness-choices-practice.md), and PR 6c's in [the scored run](EXP-001-harness-choices-scored.md).
+> **Last updated**: 2026-11-27
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), which lists the harness PRs and what each leaves the next
 
 [Pre-registration §3](EXP-001-preregistration.md#3-running-it) says every

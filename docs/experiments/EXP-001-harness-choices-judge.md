@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices: the judge
 
-> **Status**: 🚧 **In Progress** — PR 6a's rows froze when it merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)).
-> **Last updated**: 2026-10-07
+> **Status**: ✅ **Implemented** — PR 6a's rows froze when it merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)).
+> **Last updated**: 2026-11-27
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
 These are the frozen choices of PR 6a, which adds the LLM judge: the third
