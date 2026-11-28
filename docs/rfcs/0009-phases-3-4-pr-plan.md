@@ -8,12 +8,15 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: row R2 of the [v0.4.0 plan](../v0.4.0-plan.md#progress); its rows A3 and A4 are this plan's two phases. Phases 1–2 are in the [v0.3.0 plan](0009-pr-plan.md).
 
-> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
-> PR from this plan starts or merges before then
-> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)). The open half
+> **Resumed** by the
+> [Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings),
+> after the pause of 2026-11-07: Phase 4 (row A4) may go on
+> ([why](../v0.4.0-plan.md#resumed-in-a-changed-order)). The open half
 > of [ISSUE-0196](../issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md),
-> the environment a listed shell command inherits, waits with PR 16, which
-> files it.
+> the environment a listed shell command inherits, resumes with PR 16, which
+> files it. The [size table](#file-size-constraints) predates the 700-line
+> warning
+> ([ISSUE-0288](../issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
 
 > Sizes are calibrated at 3.5× naive, the factor the
 > [Phases 1–2 plan](0009-pr-plan.md) recommends after every security PR there

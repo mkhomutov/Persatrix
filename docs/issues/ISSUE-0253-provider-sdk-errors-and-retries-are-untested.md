@@ -86,3 +86,9 @@ The severity is proposed here, not ruled.
 
 > 2026-11-14 — filed from the review of #1118. Both SDK test files list
 > errors and retries as not covered.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

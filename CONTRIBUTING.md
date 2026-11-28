@@ -36,7 +36,7 @@ make validate # config validation
 - **[`python-constraints-refresh.yml`](.github/workflows/python-constraints-refresh.yml)** — Weekly: tries the newest Python releases on the Python checks and, when they pass, posts a link that opens the PR moving CI's pins in `.github/python-constraints.txt` and `.github/python-constraints-providers.txt`.
 - **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, the Rust release in `cli/rust-toolchain.toml` and the Docker and compose images among them, titled `chore(deps): …` so the title check passes.
 
-Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting. The same file names the one job that is not required, `Python 3.12 (unit tests)`, and why.
+Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting. Every CI job is in that set; a job that is ever left out is named in the same file as not required, with the reason.
 
 ### Pre-commit Hook
 

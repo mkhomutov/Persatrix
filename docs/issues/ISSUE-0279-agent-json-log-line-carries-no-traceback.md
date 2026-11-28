@@ -83,3 +83,9 @@ both (`format_exc_info`, `dict_tracebacks`). Decide in the same change:
 > ([ISSUE-0246](ISSUE-0246-the-log-shippers-counters-reach-no-metric.md),
 > low: an observability gap with nothing lost); not ruled by the
 > maintainer.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

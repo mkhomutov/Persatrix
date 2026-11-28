@@ -64,3 +64,9 @@ delivered. Check the query plan of the delete stays the one
 > 2026-11-14 — found while reviewing the fix for ISSUE-0203. The code is
 > the same on `main` at `dd006cba`; that fix did not cause it and does
 > not change it.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

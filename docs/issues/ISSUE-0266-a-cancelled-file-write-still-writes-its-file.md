@@ -133,3 +133,9 @@ for the write, without the paused agent.
 > neither text. Both are closed in the same pull request by a lock for
 > each path in `write_text_file`. This text now lists what can cancel a
 > tool call and what is left once writes to a path wait for each other.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

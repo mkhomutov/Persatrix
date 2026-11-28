@@ -82,3 +82,9 @@ the reproduction did, by wrapping the validator.
 > every worker thread is busy, or while an earlier write to the same
 > path is still going, because the write then waits for its turn after
 > the check has been made.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

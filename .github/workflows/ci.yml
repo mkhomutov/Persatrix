@@ -428,10 +428,11 @@ jobs:
     # job above. 3.11 stays the Python of every other job, so the floor the
     # package declares keeps being tested.
     #
-    # It is not a required check. Which checks `main` requires is the owner's
-    # setting; docs/methodology/branch-protection.json names this job under
-    # `not_required`, with the reason, so that it is a recorded choice and
-    # not an oversight. tests/unit/python/test_python_312_job.py pins the job.
+    # It is a required check since ruling (ab) of the sequencing Amendment
+    # 2026-11-28: docs/methodology/branch-protection.json lists it under
+    # `contexts`, and the owner applies that file to `main`. Until then the
+    # file named it under `not_required`, because it had no history yet.
+    # tests/unit/python/test_python_312_job.py pins the job.
     name: Python 3.12 (unit tests)
     runs-on: ubuntu-latest
     steps:

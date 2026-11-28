@@ -142,3 +142,8 @@ work. The list itself was already in the shipped config.
 > files it, and that row is paused until the next strategy review
 > ([v0.4.0 plan](../v0.4.0-plan.md#paused-until-the-strategy-review)). The
 > config half stays fixed.
+
+> 2026-11-28 — **the environment half resumes with row A4.** The
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings)
+> ended the v0.4.0 pause (rulings y and z), so RFC 0009 Phase 4 may go on,
+> and its PR 16 files this half as before.

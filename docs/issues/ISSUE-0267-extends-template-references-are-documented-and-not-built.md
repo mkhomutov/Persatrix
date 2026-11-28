@@ -119,3 +119,9 @@ one loop.
 > text now say what is so. This summary also no longer spells the key's
 > value out: the index's reader cut the row at its hash sign
 > ([ISSUE-0271](ISSUE-0271-issue-index-cuts-a-summary-at-a-hash-after-an-escaped-quote.md)).
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

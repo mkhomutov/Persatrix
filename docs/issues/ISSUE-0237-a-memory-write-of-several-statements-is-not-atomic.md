@@ -109,3 +109,9 @@ be). The lock is the general answer and would let
 > is committed. On a persona's stop path it changes whether: see
 > Context. Two writes were missing from the list, `seed_trust` and a
 > chunked `mark_recalled_for_agent`.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

@@ -52,17 +52,20 @@ def test_a_job_named_as_not_required_is_a_ci_job_with_a_reason_and_is_not_requir
         assert len(reason.split()) >= 5, f"{job}: say why it is not required"
 
 
-def test_one_job_is_not_required() -> None:
-    """The list itself is pinned: a second job that `main` does not require is
-    a change to make here on purpose, not one that rides along."""
-    assert sorted(_not_required()) == ["Python 3.12 (unit tests)"]
+def test_no_job_is_named_as_not_required() -> None:
+    """The list itself is pinned, and it is empty: every CI job is required
+    since `Python 3.12 (unit tests)` joined the set (ruling (ab) of the
+    sequencing Amendment 2026-11-28). A job that `main` does not require is a
+    change to make here on purpose, not one that rides along."""
+    assert sorted(_not_required()) == []
 
 
-def test_the_required_set_is_read_without_the_jobs_that_are_not_required() -> None:
+def test_the_required_set_is_every_ci_job_and_the_title_check() -> None:
     """`make branch-protection-apply` sends `contexts` and nothing else."""
     assert set(load_desired()) == {"strict", "contexts"}
-    assert "Python 3.12 (unit tests)" not in load_desired()["contexts"]
-    assert len(load_desired()["contexts"]) == 12
+    assert "Python 3.12 (unit tests)" in load_desired()["contexts"]
+    assert set(load_desired()["contexts"]) == _ci_job_names() | {"Validate PR Title"}
+    assert len(load_desired()["contexts"]) == 13
 
 
 def test_diff_reports_both_directions_and_strict() -> None:

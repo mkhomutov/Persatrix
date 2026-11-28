@@ -4,9 +4,10 @@
 > of the review held on 2026-11-28 at `9ec80213`, the first after
 > [EXP-001's result](experiments/EXP-001-result.md) was published on
 > 2026-11-27. Its row in the standing review's
-> [log](project-strategy.md#10-review-cadence-and-log) is the summary. This
-> file is what the next sequencing amendment ratifies; until that amendment
-> merges, nothing here binds. The figures the review measured again are in
+> [log](project-strategy.md#10-review-cadence-and-log) is the summary. The
+> [sequencing Amendment 2026-11-28](v0.4.x-sequencing-2026-11-28.md#rulings)
+> ratifies its six rulings, as rulings (y) to (ad); nothing here binds before
+> that amendment merges. The figures the review measured again are in
 > the [evidence companion](project-strategy-evidence.md), and the findings it
 > re-verified in the
 > [four-reviews companion](project-strategy-four-reviews.md#1-what-the-four-reviews-established).
@@ -61,7 +62,9 @@ result to set beside one.
 
 Each was put to the maintainer as a recommendation with its reason, and the
 maintainer accepted all six as put on 2026-11-28. None binds until the next
-sequencing amendment ratifies it.
+sequencing amendment ratifies it: the
+[Amendment 2026-11-28](v0.4.x-sequencing-2026-11-28.md#rulings) does, with
+ruling (y) for the first and so on to ruling (ad) for the sixth.
 
 1. **The society work goes on, in a changed order.** EXP-002's
    pre-registration merges before any [v0.4.0 row](v0.4.0-plan.md#progress)
@@ -121,5 +124,7 @@ sequencing amendment ratifies it.
   — rulings (h) and (l).
 - [v0.4.x sequencing, 2026-10-21](v0.4.x-sequencing-2026-10-21.md#rulings) —
   rulings (t) and (u).
-- [v0.4.0 plan](v0.4.0-plan.md#paused-until-the-strategy-review) — the pause,
-  and the rows that wait.
+- [v0.4.x sequencing, 2026-11-28](v0.4.x-sequencing-2026-11-28.md#rulings) — the
+  amendment that ratifies this review, with the pause's record.
+- [v0.4.0 plan](v0.4.0-plan.md#resumed-in-a-changed-order) — the rows that
+  resume, and the rows that wait.

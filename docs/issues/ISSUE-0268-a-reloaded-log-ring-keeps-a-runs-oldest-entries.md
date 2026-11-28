@@ -99,3 +99,9 @@ with a ring smaller than the run's entries on disk pins it.
 > wrote the guide's restart sentence for
 > [ISSUE-0223](ISSUE-0223-logs-follow-ignores-its-filters.md). Filed
 > there; the code is not changed by that pull request.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

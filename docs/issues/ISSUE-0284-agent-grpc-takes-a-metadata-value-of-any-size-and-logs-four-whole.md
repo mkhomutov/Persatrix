@@ -122,3 +122,9 @@ Two separate things, a test first for each.
 > ([ISSUE-0265](ISSUE-0265-merged-log-view-reads-every-finished-run-from-disk.md),
 > low: one request makes the orchestrator read up to 512 MB of log files);
 > not ruled by the maintainer.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

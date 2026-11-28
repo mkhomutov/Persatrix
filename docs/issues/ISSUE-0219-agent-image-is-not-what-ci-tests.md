@@ -215,3 +215,10 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > [#1138](https://github.com/mkhomutov/Persatrix/pull/1138), which merged
 > on this day, before this fix did, and GitHub issue 1134 is closed. An
 > image built from the pins holds 1.45.2.
+
+> 2026-11-28 — **the job becomes a required check**, by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
+> It moved from `not_required` to `contexts` in
+> `docs/methodology/branch-protection.json`, and the owner applies the set
+> with `make branch-protection-apply`. From 2026-11-21 to 2026-11-28 the job
+> ran 64 times, 18 of them on `main`, and passed every time.

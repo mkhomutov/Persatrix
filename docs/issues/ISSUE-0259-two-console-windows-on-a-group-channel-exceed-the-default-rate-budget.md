@@ -157,3 +157,9 @@ defaults are a security setting:
 > lost, and every stop has a **Retry**. For `medium`: a second window
 > is an ordinary thing to open, and it costs a refused post and a
 > window that does not start.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

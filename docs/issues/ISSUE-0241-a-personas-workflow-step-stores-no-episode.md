@@ -70,3 +70,9 @@ episode.
 > while running whole persona turns through a workflow step. Not part
 > of that fix: the failure is on `main` and has nothing to do with the
 > shape of the model's reply.
+
+> 2026-11-28 — severity ruled `medium`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

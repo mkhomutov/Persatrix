@@ -213,10 +213,12 @@ to make room ("split, don't trim").
   at about 250 lines of code, and file lengths went on piling up just under
   500. Counting code lines only was considered and not taken: it needs a
   comment parser for each of five languages, and a miscount would fail CI.
-  The failure stays at 800. No sequencing amendment records this yet, so
-  ruling (e)'s own text still says 500; until an amendment carries the new
-  figure, this entry is where the change is written down
-  ([ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
+  The failure stays at 800.
+  [Ruling (ab)](v0.4.x-sequencing-2026-11-28.md#rulings) of the sequencing
+  Amendment 2026-11-28 carries the new figure and amends ruling (e), whose
+  own text still says 500. The plans and the comment that still give 500 as
+  the mark are listed in
+  [ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md).
 - **A document** still fails one word over its cap. Split it before the cap
   arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
   cap turns every later fix into deleted context. A patch release's version

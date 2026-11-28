@@ -146,7 +146,7 @@ at 2026-10-20 and at 2026-11-28.
 | Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` (now :281-284) injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live". No EXP-001 arm varies trust, so its result says nothing about this row |
 | The audience gate was shadow-only | [RFC 0037 audience amendment](rfcs/0037-amendment-audience-egress.md) status 🔄 Shadow; flip is verdict-gated (v0.3.16 PR A3). Live since A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) |
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)). EXP-001's scored run: 150 meetings, $44.09 for the arms and $4.44 for the judge |
-| Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. The next ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) ordered none either, and ruled that it reopens only on an outside ask, for the next sequencing amendment to ratify. RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
+| Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. The next ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) ordered none either, and it reopens only on an outside ask recorded in an amendment's External evidence section ([ruling aa](v0.4.x-sequencing-2026-11-28.md#rulings)). RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
 | Licence grant | Non-commercial use only, deployments under 10 users ([LICENSE](../LICENSE) Additional Use Grant) |
 | Interop drafts waiting | [#754](https://github.com/mkhomutov/Persatrix/pull/754) and [#755](https://github.com/mkhomutov/Persatrix/pull/755) (RFC 0041 Phase 1) open since 2026-07-18; still drafts at 2026-10-20, now v0.4.0's cuttable D4; still drafts at 2026-11-28, waiting with the pause |
 
@@ -166,12 +166,13 @@ From [v0.3.x sequencing](v0.3.x-sequencing.md); each row is one amendment.
 | 2026-10-18 | **the goal** | a society that pursues long goals; EXP-001 a measurement; v0.4.0 opens |
 | 2026-10-18 | substrate | v0.4.0's shape, in [v0.4.x sequencing](v0.4.x-sequencing.md): the phases' own prerequisites board, nothing else |
 | 2026-10-21 | **the reading** | the first review acted on, in [a file of its own](v0.4.x-sequencing-2026-10-21.md): the goal replaces the product reading; rule 6 stays, read for the goal; the README may be rewritten after the strategy rewrite; Apache-2.0 outside the reserved seams by a licence PR |
+| 2026-11-28 | **the order** | the review after EXP-001's result acted on, in [a file of its own](v0.4.x-sequencing-2026-11-28.md): the society work goes on, with EXP-002's pre-registration ahead of every v0.4.0 row not started; the pause of 2026-11-07 ends; no extraction ordered, no component retired; the warning at 700 lines |
 
 No amendment after 2026-06-28 cites anything from outside the repository.
 Since 2026-09-12 every amendment carries an External evidence section, and
-all four are empty of positives. No amendment has been written since
-2026-10-21. The next one has a first positive entry to record: an experiment
-result published, EXP-001's, on 2026-11-27.
+all four to 2026-10-21 are empty of positives. The fifth, of 2026-11-28,
+records the first positive entry: an experiment result published, EXP-001's,
+on 2026-11-27.
 Nothing records the v0.3.11 demo being shown to anyone.
 
 ## 8. Market claims — perishable

@@ -8,9 +8,11 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress); its rows B1–B3 and the cuttable D1 are this plan's four phases
 
-> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
-> PR from this plan starts or merges before then
-> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+> **Resumed in part** by the
+> [Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings),
+> after the pause of 2026-11-07: Phase 1 (row B1) may go on; Phases 2, 2a
+> and 3 (B2, B3, D1) wait until EXP-002's pre-registration merges
+> ([why](../v0.4.0-plan.md#resumed-in-a-changed-order)).
 
 > Sizes are calibrated (1.7× naive, the v0.1 factor). Every PR stays under 500
 > changed lines and writes its failing test first.

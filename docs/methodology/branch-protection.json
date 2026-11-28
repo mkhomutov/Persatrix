@@ -13,10 +13,9 @@
     "Web console (build + test)",
     "Dockerignore context hygiene",
     "Cost regression gate (bored persona)",
-    "Docs hygiene"
+    "Docs hygiene",
+    "Python 3.12 (unit tests)"
   ],
-  "_not_required_comment": "CI jobs that run on every pull request and that `main` does not require, each with its reason. A job in ci.yml must be in `contexts` or here, so a job that can merge red is a recorded choice. To require one, move its name to `contexts` and apply.",
-  "not_required": {
-    "Python 3.12 (unit tests)": "New with ISSUE-0219: the unit suite on the agent image's Python. Requiring a check is the owner's setting, and this one has no history on main yet."
-  }
+  "_not_required_comment": "CI jobs that run on every pull request and that `main` does not require, each with its reason. A job in ci.yml must be in `contexts` or here, so a job that can merge red is a recorded choice. To require one, move its name to `contexts` and apply. None today: `Python 3.12 (unit tests)` was named here from ISSUE-0219 until ruling (ab) of the sequencing Amendment 2026-11-28 required it, after 64 green runs.",
+  "not_required": {}
 }

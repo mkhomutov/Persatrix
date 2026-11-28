@@ -87,3 +87,9 @@ agent's config against the schema when the agent starts, as
 > the gate's answer here as it was and corrects the docstring of
 > `check()`: it said "a non-empty list or True" where the code grants on
 > any truthy value. Older than that pull request.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

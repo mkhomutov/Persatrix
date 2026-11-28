@@ -90,3 +90,9 @@ which is why this was filed and not folded into ISSUE-0206's fix.
 > reached only through the `SendChatMessage` RPC; on a channel the same
 > reply is discarded quietly; a lone surrogate was missing; and so was
 > the list of objects with no `action_type`.
+
+> 2026-11-28 — severity ruled `medium`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

@@ -86,3 +86,9 @@ the decision log's. An external rotator is the wrong tool here.
 > 2026-11-14 — the list of events written per request was two short:
 > `rate_limit.agent_evicted` and `authz.denied`. Found in review of the
 > ISSUE-0208 fix; the second is filed as ISSUE-0248.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

@@ -143,3 +143,9 @@ path and the failed-turn path agree.
 > message with nothing posted, and the rest follows from a round in
 > which nobody replies; it is set out in the note on
 > [ISSUE-0161](ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md).
+
+> 2026-11-28 — severity ruled `medium`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

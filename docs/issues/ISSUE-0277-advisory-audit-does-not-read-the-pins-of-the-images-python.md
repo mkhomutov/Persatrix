@@ -66,3 +66,9 @@ opens then names which Python a finding is on.
 > [ISSUE-0283](ISSUE-0283-provider-sdks-are-run-on-python-311-only.md).
 > The tests that run the provider SDKs run on Python 3.11 only, so the
 > `numpy` pin this issue names is neither audited nor run on 3.12.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
