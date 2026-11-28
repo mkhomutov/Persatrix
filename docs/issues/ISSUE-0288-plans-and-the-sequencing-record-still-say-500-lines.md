@@ -100,8 +100,11 @@ left.
 > ratified by ruling (ab) of the
 > [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
 > The same ruling is the amendment line this issue asked for: ruling (e)'s
-> warning is over 700 lines. Its PR corrected the v0.4.0 plan's risk row,
-> and the header of each v0.4.0 PR plan with such a table now points here.
-> Still open: the table rows of the PR plans of RFC 0012, RFC 0009
-> Phases 3–4, RFC 0021 Phase 2, RFC 0041 and RFC 0042, each for the first
-> PR that reopens its plan, and the docstring of `agents/channel_receive.py`.
+> warning is over 700 lines. Its PR corrected the v0.4.0 plan's risk row.
+> It also edited the header notes of four PR plans (RFC 0012, RFC 0009
+> Phases 3–4, RFC 0021 Phase 2 and RFC 0041) and left their tables: each
+> header now points here. That is a reading of "the first PR that reopens
+> that plan" as the first PR that does a row's work, since only that PR
+> can say whether it still splits the file. Still open on that reading:
+> the table rows of those four plans and of RFC 0042's, and the docstring
+> of `agents/channel_receive.py`.

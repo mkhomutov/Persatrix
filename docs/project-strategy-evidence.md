@@ -148,7 +148,7 @@ at 2026-10-20 and at 2026-11-28.
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)). EXP-001's scored run: 150 meetings, $44.09 for the arms and $4.44 for the judge |
 | Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. The next ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) ordered none either, and it reopens only on an outside ask recorded in an amendment's External evidence section ([ruling aa](v0.4.x-sequencing-2026-11-28.md#rulings)). RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
 | Licence grant | Non-commercial use only, deployments under 10 users ([LICENSE](../LICENSE) Additional Use Grant) |
-| Interop drafts waiting | [#754](https://github.com/mkhomutov/Persatrix/pull/754) and [#755](https://github.com/mkhomutov/Persatrix/pull/755) (RFC 0041 Phase 1) open since 2026-07-18; still drafts at 2026-10-20, now v0.4.0's cuttable D4; still drafts at 2026-11-28, waiting with the pause |
+| Interop drafts waiting | [#754](https://github.com/mkhomutov/Persatrix/pull/754) and [#755](https://github.com/mkhomutov/Persatrix/pull/755) (RFC 0041 Phase 1) open since 2026-07-18; still drafts at 2026-10-20, now v0.4.0's cuttable D4; still drafts at 2026-11-28, waiting with the pause; since the Amendment 2026-11-28 they wait with D4 for EXP-002's pre-registration |
 
 ## 7. The decision log, condensed
 

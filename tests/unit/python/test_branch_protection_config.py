@@ -53,9 +53,9 @@ def test_a_job_named_as_not_required_is_a_ci_job_with_a_reason_and_is_not_requir
 
 
 def test_no_job_is_named_as_not_required() -> None:
-    """The list itself is pinned, and it is empty: every CI job is required
-    since `Python 3.12 (unit tests)` joined the set (ruling (ab) of the
-    sequencing Amendment 2026-11-28). A job that `main` does not require is a
+    """The list itself is pinned, and it is empty: every CI job is in the
+    required set since `Python 3.12 (unit tests)` joined it (ruling (ab) of
+    the sequencing Amendment 2026-11-28). A job left out of the set is a
     change to make here on purpose, not one that rides along."""
     assert sorted(_not_required()) == []
 

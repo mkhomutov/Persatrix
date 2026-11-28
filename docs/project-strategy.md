@@ -221,7 +221,8 @@ column in the four-reviews companion's
 records any decision rule that fired, lists every addition boarded by
 [ruling (u)](v0.4.x-sequencing-2026-10-21.md#rulings), beside its experiment's result once published,
 takes up what an amendment passed to it ([rulings (aa) and (ac)](v0.4.x-sequencing-2026-11-28.md#rulings)
-pass the Rust CLI and the workflow engine, and the trust score),
+pass the Rust CLI and the workflow engine, and the trust score, to the first
+review after EXP-002's pre-registration merges),
 and appends a row below. A review that
 changes a decision is ratified by the sequencing amendment that acts on it,
 not by this file.
