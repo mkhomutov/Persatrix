@@ -69,7 +69,9 @@ The traffic endpoints need push access.
 ## 3. Pace
 
 Merged PRs by month, typed from the squash title
-(`gh pr list --state merged --limit 1000 --json title,mergedAt`):
+(`gh pr list --state merged --limit 5000 --json title,mergedAt`; the limit
+must stay above the count of merged PRs, 1 119 on 2026-11-28, or the oldest
+months read short):
 
 | Month 2026 | Merged | feat | fix | docs | chore | other |
 |------------|-------:|-----:|----:|-----:|------:|------:|
@@ -88,9 +90,10 @@ Since the reviews' baseline (`git log f52e7ff6..HEAD --format=%s`): 35
 commits — 21 `docs`, 12 `fix`, 2 `ci`, 0 `feat`. From `cbeea7bc` to
 `04bc24d0`: 107 — 32 `fix`, 32 `docs`, 19 `feat`, 10 `ci`, 9 `chore`, 4
 `test`, 1 `revert`. From `04bc24d0` to `9ec80213`: 101 — 35 `fix`, 23 `docs`,
-19 `feat`, 18 `chore`, 5 `ci`, 1 `test`. Of November's 32 fixes, 27 close
-findings of the quality review of 2026-11-10, and 17 of the pull requests
-merged since 2026-10-21 are Dependabot's.
+19 `feat`, 18 `chore`, 5 `ci`, 1 `test`. Of November's 32 fixes, 27 name an
+issue numbered 0196 or later. Of those, 26 name one of the 38 findings of the
+quality review of 2026-11-10, and 22 closed their issue. Dependabot opened 17
+of the pull requests merged since 2026-10-21.
 
 `agents/tools/mcp_bridge.py`, `internal/mcp/`, `internal/a2a/` and the workflow
 engine (`internal/planner`, `scheduler`, `executor`, `state`) took no
@@ -141,8 +144,8 @@ at 2026-10-20 and at 2026-11-28.
 | Claim | Evidence |
 |-------|----------|
 | The memory budget was a hardcoded constant | `agents/persona_runtime/memory_budget.py:107` — `MEMORY_BUDGET_TOKENS: int = 1500`; no key in `config/optimization.yaml`. Since v0.3.16 K1 ([#944](https://github.com/mkhomutov/Persatrix/pull/944)), `memory_budget.tokens` there sets it (the constant is now at :111) |
-| `agents/memory/` leans on sibling modules | Besides the standard library, `aiosqlite` and `opentelemetry`, it imports `..llm_client`, `..principal_id`, `..session_id`, `..epoch_id`, `..prompt_loader` and `..model_aliases`, and since 2026-09-11 `..clock` and `..llm_types` (corrected 2026-10-20; the row said it stood alone), and since 2026-10-20 `..observability`, `..security` and `..sender_type`: `git ls-files 'agents/memory/*.py' \| xargs grep -hoE '^(from\|import) [a-zA-Z_.]+' \| sort \| uniq -c` |
-| No ablation or baseline result exists | `git grep -niE 'ablat' -- docs/ evaluators/ tests/` → 0; `git grep -niE 'baseline\|single[- ]call' -- evaluators/` → 0. At 2026-10-20 the greps return 3 (the strategy docs' own text) and 1 (a comment in `evaluators/exp001/costs.py`); EXP-001's harness builds the baseline, arm A (`evaluators/exp001/arm_a.py`), but no result exists. At 2026-11-28 one does: [EXP-001's result](experiments/EXP-001-result.md), published 2026-11-27, compares four arms with arm A. The greps return 3 and 66: the comment, and 65 lines in EXP-001's published run records |
+| `agents/memory/` leans on sibling modules | Besides the standard library, `aiosqlite` and `opentelemetry`, it imports `..llm_client`, `..principal_id`, `..session_id`, `..epoch_id`, `..prompt_loader` and `..model_aliases`, and since 2026-09-11 `..clock` and `..llm_types` (corrected 2026-10-20; the row said it stood alone). Corrected 2026-11-28: it imports `..observability` and `..sender_type` too, both there on 2026-10-20 and missed by this row, and since 2026-11-07 `..security` ([#1087](https://github.com/mkhomutov/Persatrix/pull/1087)): `git ls-files 'agents/memory/*.py' \| xargs grep -hoE '^(from\|import) [a-zA-Z_.]+' \| sort \| uniq -c` |
+| No ablation or baseline result exists | `git grep -niE 'ablat' -- docs/ evaluators/ tests/` → 0; `git grep -niE 'baseline\|single[- ]call' -- evaluators/` → 0. At 2026-10-20 the greps return 3 (the strategy docs' own text) and 1 (a comment in `evaluators/exp001/costs.py`); EXP-001's harness builds the baseline, arm A (`evaluators/exp001/arm_a.py`), but no result exists. At 2026-11-28 one does: [EXP-001's result](experiments/EXP-001-result.md), published 2026-11-28, has five arms and five comparisons, two of them against arm A. The greps return 3 and 66: the comment, and 65 lines in EXP-001's published run records |
 | Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` (now :281-284) injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live". No EXP-001 arm varies trust, so its result says nothing about this row |
 | The audience gate was shadow-only | [RFC 0037 audience amendment](rfcs/0037-amendment-audience-egress.md) status 🔄 Shadow; flip is verdict-gated (v0.3.16 PR A3). Live since A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) |
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)). EXP-001's scored run: 150 meetings, $44.09 for the arms and $4.44 for the judge |
@@ -171,7 +174,7 @@ No amendment after 2026-06-28 cites anything from outside the repository.
 Since 2026-09-12 every amendment carries an External evidence section, and
 all four are empty of positives. No amendment has been written since
 2026-10-21. The next one has a first positive entry to record: an experiment
-result published, EXP-001's, on 2026-11-27.
+result published, EXP-001's, on 2026-11-28.
 Nothing records the v0.3.11 demo being shown to anyone.
 
 ## 8. Market claims — perishable
