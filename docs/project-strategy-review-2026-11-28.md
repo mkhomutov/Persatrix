@@ -3,7 +3,8 @@
 > Companion to the [standing strategy review](project-strategy.md): the record
 > of the review held on 2026-11-28 at `9ec80213`, the first after
 > [EXP-001's result](experiments/EXP-001-result.md) was published on
-> 2026-11-27. Its row in the standing review's
+> 2026-11-28, the day its pull request merged; the result document itself is
+> dated 2026-11-27. Its row in the standing review's
 > [log](project-strategy.md#10-review-cadence-and-log) is the summary. The
 > [sequencing Amendment 2026-11-28](v0.4.x-sequencing-2026-11-28.md#rulings)
 > ratifies its six rulings, as rulings (y) to (ad); nothing here binds before
@@ -36,6 +37,18 @@ with its limits beside it:
   ([result §7](experiments/EXP-001-result.md#7-what-this-result-cannot-show)).
 - EXP-001 is one short job on one model. It cannot show whether a society
   keeps making progress on a long task.
+
+[Part 2 §5](experiments/EXP-001-preregistration-scoring.md#5-how-a-rule-fires)
+fixed three readings of the rules before any run, and has the review that
+logs the rule record them beside it:
+
+- "Quality per dollar" is a memo's value at a price of $1.00 a quality point:
+  the price times its quality, minus its arm's dollars per plan.
+- Where rules 1 and 2 overlap, rule 1 comes first.
+- Rule 3's "D′ matches D" means D does not beat D′.
+
+Only the first bore on this result. C did not beat A at all, so the overlap
+did not arise, and the checks stopped before rule 3.
 
 Rulings (h) and (l) of the
 [Amendment 2026-10-18](v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
