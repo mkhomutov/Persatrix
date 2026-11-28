@@ -1,0 +1,193 @@
+EXP-001 scored run, window 1: the seal was opened at 2026-11-26T19:48:29.917795+00:00
+Two AI raters filled person-1's and person-2's sheets in the two people's place, a deviation from part 2 of the pre-registration (docs/experiments/EXP-001-deviation-ai-raters.md): no rule fires as registered, and the outcome below is what the AI-scored figures show.
+Outcome: rule 1 fires: stop adding society features for this job; reposition on the gate alone
+Scoring was due by 2026-11-27T18:12:29.553065+00:00: finished on time
+Quality averages person-1, person-2, judge
+Series kept: series-1, series-2, series-3, series-4, series-5
+
+Agreement, each pair's per-plan rank correlation averaged over the plans:
+  person-1 and person-2: 0.878 over 19 plans, 1 skipped; over every memo at once 0.950
+  person-1 and judge: 0.656 over 18 plans, 2 skipped; over every memo at once 0.847
+  person-2 and judge: 0.790 over 18 plans, 2 skipped; over every memo at once 0.890
+  their average: 0.775, enough to carry a decision
+
+The checks, in order:
+  C against A: C does not beat A; mean -0.894, interval -1.430 to -0.357; series differences -1.096, -1.070, -0.121, -1.080, -1.100
+    'C clearly beats A' fails for a quality point priced at $0.00 to any higher; repriced at claude-haiku-4-5, it fails
+
+Reported, never deciding:
+  the rule with bids and memory summaries repriced at claude-haiku-4-5: rule 1 fires: stop adding society features for this job; reposition on the gate alone
+  the rule on person-1's and person-2's sheets alone: rule 1 fires: stop adding society features for this job; reposition on the gate alone (their agreement 0.878)
+  D against C: D does not beat C; mean 0.581, interval -0.910 to 2.072; series differences 0.179, 1.285, -1.359, 1.367, 1.435
+  D against D-prime: D does not beat D-prime; mean -0.734, interval -1.839 to 0.371; series differences -0.809, -0.410, -2.196, 0.176, -0.431
+  B against A: B does not beat A; mean -1.026, interval -1.635 to -0.417; series differences -1.459, -0.832, -1.317, -1.266, -0.255
+  C against B: C does not beat B; mean 0.132, interval -0.805 to 1.070; series differences 0.363, -0.238, 1.196, 0.186, -0.845
+
+Each arm:
+  A: quality 7.938 (plans 7.333, control plans 9.750); $0.0136 a plan, $0.0136 repriced; 581.802 quality a dollar
+    0.255 minutes a plan; 31.088 quality a minute; recall 0 of 20 right
+    criteria: C1 1.967, C2 0.178, C3 2.000, C4 2.000, C5 1.350
+  B: quality 7.371 (plans 6.800, control plans 9.083); $0.4729 a plan, $0.4729 repriced; 15.586 quality a dollar
+    7.954 minutes a plan; 0.927 quality a minute; recall 0 of 20 right
+    criteria: C1 2.000, C2 0.178, C3 2.000, C4 1.933, C5 0.850
+  C: quality 7.383 (plans 6.733, control plans 9.333); $0.3530 a plan, $0.3146 repriced; 20.914 quality a dollar
+    10.648 minutes a plan; 0.693 quality a minute; recall 0 of 20 right
+    criteria: C1 2.000, C2 0.200, C3 2.000, C4 1.950, C5 0.817
+  D: quality 8.012 (plans 7.711, control plans 8.917); $0.4009 a plan, $0.3234 repriced; 19.984 quality a dollar
+    12.903 minutes a plan; 0.621 quality a minute; recall 16 of 20 right
+    criteria: C1 1.867, C2 1.267, C3 1.900, C4 1.817, C5 1.033
+  D-prime: quality 8.704 (plans 8.467, control plans 9.417); $0.3585 a plan, $0.3272 repriced; 24.278 quality a dollar
+    12.421 minutes a plan; 0.701 quality a minute; recall 20 of 20 right
+    criteria: C1 1.950, C2 1.667, C3 1.833, C4 1.867, C5 1.333
+
+Each meeting:
+  series-1 A series-1-briefing: one call
+  series-1 A series-1-plan-1: one call; 0.2 minutes
+  series-1 A series-1-plan-2: one call; 0.3 minutes
+  series-1 A series-1-plan-3: one call; 0.3 minutes
+  series-1 A series-1-plan-4: one call; 0.3 minutes
+  series-1 A series-1-recall: one call
+  series-1 B series-1-briefing: closed by idle
+  series-1 B series-1-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 435 words
+  series-1 B series-1-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.2 minutes; memo cut at 400 of 428 words
+  series-1 B series-1-plan-3: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 4.9 minutes
+  series-1 B series-1-plan-4: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 5.7 minutes
+  series-1 B series-1-recall: closed by depth_cap; energy lunar-stoat 0.70, velvet-pika 0.70, ripple-kite 0.70, crimson-crow 0.80
+  series-1 C series-1-briefing: closed by idle
+  series-1 C series-1-plan-1: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.75, ripple-kite 0.90, crimson-crow 0.90; 6.9 minutes
+  series-1 C series-1-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes
+  series-1 C series-1-plan-3: closed by idle; energy lunar-stoat 0.75, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.80; 16.2 minutes
+  series-1 C series-1-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.2 minutes; memo cut at 400 of 403 words
+  series-1 C series-1-recall: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.90
+  series-1 D series-1-briefing: closed by idle
+  series-1 D series-1-plan-1: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 14.4 minutes
+  series-1 D series-1-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 422 words
+  series-1 D series-1-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes
+  series-1 D series-1-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.6 minutes
+  series-1 D series-1-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90
+  series-1 D-prime series-1-briefing: closed by idle
+  series-1 D-prime series-1-plan-1: closed by idle; energy lunar-stoat 0.75, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90; 16.8 minutes
+  series-1 D-prime series-1-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 437 words
+  series-1 D-prime series-1-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.1 minutes; memo cut at 400 of 436 words
+  series-1 D-prime series-1-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 444 words
+  series-1 D-prime series-1-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-2 A series-2-briefing: one call
+  series-2 A series-2-plan-1: one call; 0.3 minutes
+  series-2 A series-2-plan-2: one call; 0.2 minutes
+  series-2 A series-2-plan-3: one call; 0.3 minutes
+  series-2 A series-2-plan-4: one call; 0.3 minutes
+  series-2 A series-2-recall: one call
+  series-2 B series-2-briefing: closed by idle
+  series-2 B series-2-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes
+  series-2 B series-2-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.0 minutes
+  series-2 B series-2-plan-3: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.75; 3.5 minutes
+  series-2 B series-2-plan-4: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 4.9 minutes
+  series-2 B series-2-recall: closed by depth_cap; energy lunar-stoat 0.75, velvet-pika 0.70, ripple-kite 0.70, crimson-crow 0.80
+  series-2 C series-2-briefing: closed by idle
+  series-2 C series-2-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.6 minutes; memo cut at 400 of 439 words
+  series-2 C series-2-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.2 minutes; memo cut at 400 of 401 words
+  series-2 C series-2-plan-3: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.90, crimson-crow 0.80; 6.2 minutes
+  series-2 C series-2-plan-4: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.80, ripple-kite 0.90, crimson-crow 0.90; 6.8 minutes
+  series-2 C series-2-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-2 D series-2-briefing: closed by idle
+  series-2 D series-2-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes; memo cut at 400 of 406 words
+  series-2 D series-2-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.7 minutes
+  series-2 D series-2-plan-3: closed by idle; energy lunar-stoat 0.75, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90; 16.7 minutes
+  series-2 D series-2-plan-4: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 14.7 minutes
+  series-2 D series-2-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-2 D-prime series-2-briefing: closed by depth_cap
+  series-2 D-prime series-2-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes
+  series-2 D-prime series-2-plan-2: closed by depth_cap; energy lunar-stoat 0.85, velvet-pika 0.75, ripple-kite 0.90, crimson-crow 0.70; 5.0 minutes; memo cut at 400 of 430 words
+  series-2 D-prime series-2-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.1 minutes; memo cut at 400 of 403 words
+  series-2 D-prime series-2-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.2 minutes; memo cut at 400 of 461 words
+  series-2 D-prime series-2-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-3 A series-3-briefing: one call
+  series-3 A series-3-plan-1: one call; 0.3 minutes
+  series-3 A series-3-plan-2: one call; 0.2 minutes
+  series-3 A series-3-plan-3: one call; 0.3 minutes
+  series-3 A series-3-plan-4: one call; 0.2 minutes
+  series-3 A series-3-recall: one call
+  series-3 B series-3-briefing: closed by depth_cap
+  series-3 B series-3-plan-1: closed by depth_cap; energy lunar-stoat 0.55, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 5.0 minutes
+  series-3 B series-3-plan-2: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 4.1 minutes
+  series-3 B series-3-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes; memo cut at 400 of 411 words
+  series-3 B series-3-plan-4: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 3.6 minutes
+  series-3 B series-3-recall: closed by depth_cap; energy lunar-stoat 0.75, velvet-pika 0.70, ripple-kite 0.70, crimson-crow 0.80
+  series-3 C series-3-briefing: closed by depth_cap
+  series-3 C series-3-plan-1: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90; 14.9 minutes; memo cut at 400 of 402 words
+  series-3 C series-3-plan-2: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.75, ripple-kite 0.90, crimson-crow 0.90; 6.4 minutes
+  series-3 C series-3-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes
+  series-3 C series-3-plan-4: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.90; 4.1 minutes
+  series-3 C series-3-recall: closed by idle; energy lunar-stoat 0.75, velvet-pika 0.85, ripple-kite 0.90, crimson-crow none
+  series-3 D series-3-briefing: closed by idle
+  series-3 D series-3-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes
+  series-3 D series-3-plan-2: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.85, ripple-kite 0.80, crimson-crow 0.90; 16.7 minutes
+  series-3 D series-3-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.6 minutes
+  series-3 D series-3-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.1 minutes; memo cut at 400 of 405 words
+  series-3 D series-3-recall: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.85, ripple-kite 0.90, crimson-crow none
+  series-3 D-prime series-3-briefing: closed by depth_cap
+  series-3 D-prime series-3-plan-1: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes
+  series-3 D-prime series-3-plan-2: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.85, crimson-crow 0.80; 15.7 minutes
+  series-3 D-prime series-3-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes; memo cut at 400 of 469 words
+  series-3 D-prime series-3-plan-4: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.80; 16.2 minutes; memo cut at 400 of 465 words
+  series-3 D-prime series-3-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow none
+  series-4 A series-4-briefing: one call
+  series-4 A series-4-plan-1: one call; 0.2 minutes
+  series-4 A series-4-plan-2: one call; 0.2 minutes
+  series-4 A series-4-plan-3: one call; 0.2 minutes
+  series-4 A series-4-plan-4: one call; 0.2 minutes
+  series-4 A series-4-recall: one call
+  series-4 B series-4-briefing: closed by depth_cap
+  series-4 B series-4-plan-1: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.75; 3.2 minutes
+  series-4 B series-4-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 11.9 minutes; memo cut at 400 of 406 words
+  series-4 B series-4-plan-3: closed by depth_cap; energy lunar-stoat 0.70, velvet-pika 0.75, ripple-kite 0.75, crimson-crow 0.75; 4.6 minutes; memo cut at 400 of 412 words
+  series-4 B series-4-plan-4: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 4.7 minutes
+  series-4 B series-4-recall: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.75, ripple-kite 0.75, crimson-crow 0.75
+  series-4 C series-4-briefing: closed by idle
+  series-4 C series-4-plan-1: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 13.1 minutes
+  series-4 C series-4-plan-2: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 14.7 minutes; memo cut at 400 of 403 words
+  series-4 C series-4-plan-3: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.90; 5.3 minutes
+  series-4 C series-4-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.2 minutes
+  series-4 C series-4-recall: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.90
+  series-4 D series-4-briefing: closed by idle
+  series-4 D series-4-plan-1: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 14.3 minutes
+  series-4 D series-4-plan-2: closed by idle; energy lunar-stoat 0.75, velvet-pika 0.85, ripple-kite 0.80, crimson-crow 0.90; 14.9 minutes; memo cut at 400 of 414 words
+  series-4 D series-4-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.6 minutes; memo cut at 400 of 417 words
+  series-4 D series-4-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes; memo cut at 400 of 414 words
+  series-4 D series-4-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-4 D-prime series-4-briefing: closed by idle
+  series-4 D-prime series-4-plan-1: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90; 14.4 minutes
+  series-4 D-prime series-4-plan-2: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 13.4 minutes; memo cut at 400 of 435 words
+  series-4 D-prime series-4-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes; memo cut at 400 of 494 words
+  series-4 D-prime series-4-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.0 minutes; memo cut at 400 of 436 words
+  series-4 D-prime series-4-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-5 A series-5-briefing: one call
+  series-5 A series-5-plan-1: one call; 0.2 minutes
+  series-5 A series-5-plan-2: one call; 0.3 minutes
+  series-5 A series-5-plan-3: one call; 0.3 minutes
+  series-5 A series-5-plan-4: one call; 0.3 minutes
+  series-5 A series-5-recall: one call
+  series-5 B series-5-briefing: closed by depth_cap
+  series-5 B series-5-plan-1: closed by depth_cap; energy lunar-stoat 0.60, velvet-pika 0.80, ripple-kite 0.75, crimson-crow 0.70; 4.4 minutes
+  series-5 B series-5-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes
+  series-5 B series-5-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 11.9 minutes; memo cut at 400 of 404 words
+  series-5 B series-5-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.8 minutes
+  series-5 B series-5-recall: closed by depth_cap; energy lunar-stoat 0.70, velvet-pika 0.75, ripple-kite 0.75, crimson-crow 0.75
+  series-5 C series-5-briefing: closed by idle
+  series-5 C series-5-plan-1: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.80, ripple-kite 0.90, crimson-crow 0.80; 6.7 minutes
+  series-5 C series-5-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.4 minutes; memo cut at 400 of 431 words
+  series-5 C series-5-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.1 minutes
+  series-5 C series-5-plan-4: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 13.6 minutes
+  series-5 C series-5-recall: closed by depth_cap; energy lunar-stoat 0.65, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.90
+  series-5 D series-5-briefing: closed by idle
+  series-5 D series-5-plan-1: closed by depth_cap; energy lunar-stoat 0.80, velvet-pika 0.70, ripple-kite 0.70, crimson-crow 0.90; 5.4 minutes; memo cut at 400 of 405 words
+  series-5 D series-5-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 405 words
+  series-5 D series-5-plan-3: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.0 minutes; memo cut at 400 of 407 words
+  series-5 D series-5-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.1 minutes; memo cut at 400 of 408 words
+  series-5 D series-5-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90
+  series-5 D-prime series-5-briefing: closed by idle
+  series-5 D-prime series-5-plan-1: closed by idle; energy lunar-stoat 0.80, velvet-pika 0.85, ripple-kite 0.90, crimson-crow 0.90; 14.7 minutes
+  series-5 D-prime series-5-plan-2: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.5 minutes; memo cut at 400 of 429 words
+  series-5 D-prime series-5-plan-3: closed by depth_cap; energy lunar-stoat 0.80, velvet-pika 0.70, ripple-kite 0.90, crimson-crow 0.70; 4.6 minutes; memo cut at 400 of 408 words
+  series-5 D-prime series-5-plan-4: closed by idle; energy lunar-stoat 0.90, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90; 12.3 minutes; memo cut at 400 of 444 words
+  series-5 D-prime series-5-recall: closed by idle; energy lunar-stoat 0.85, velvet-pika 0.90, ripple-kite 0.90, crimson-crow 0.90

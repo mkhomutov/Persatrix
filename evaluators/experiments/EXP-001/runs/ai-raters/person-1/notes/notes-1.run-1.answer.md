@@ -1,0 +1,11 @@
+model: claude-fable-5-2
+N1: C5 scores 0 for an invented fact only when the memo presents as established something about the organisation, its plan or its numbers that no operator message said; a figure plainly marked as the memo's own estimate ("roughly", "likely", "estimated") or as an if-then scenario is not stated as fact and does not by itself trigger 0.
+N2: A marked estimate or scenario is still an error when it contradicts a packet figure or its arithmetic does not follow from packet figures; score 1 if the recommendation stands without it and 0 if the recommendation rests on it.
+N3: General reasoning about how audiences, sponsors or suppliers usually behave is argument, not an invented fact about the organisation; lower C5 for it only if it is plainly false or contradicts the packet.
+N4: Give C5 a 1 only when you can quote the specific statement that is wrong and say what the packet or the arithmetic gives instead; material that merely sounds unsupported, with no such statement, scores 2.
+N5: Describing what a plan implicitly relies on is critique, not error; it becomes a C5 error only when the memo attributes to the plan or the operator a number, decision or constraint the packet does not contain.
+N6: C4 scores 2 only when every lettered option, including each rejected one, is weighed on at least one of cost, time, people or risk with a reason drawn from the request or earlier meetings; one dimension per option is enough, and money earned or saved counts as cost.
+N7: A bare verdict on an option ("not viable", "not a substitute", "useful alongside") is a mention, not a comparison; because anchors are checked from 0 upwards, a memo that weighs some options and only labels another fits the 1 anchor first.
+N8: Saying what would make an option acceptable or more useful is a condition, which counts toward C3, not a weighing of that option for C4.
+N9: Weighing counts for C4 wherever it appears in the memo before the cut, including the critique section, not only under an options heading.
+N10: C4 asks whether the options were weighed, not whether the weighing is correct; a wrong figure or claim inside the comparison is scored once, under C5.

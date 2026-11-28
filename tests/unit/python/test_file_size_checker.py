@@ -212,6 +212,75 @@ def test_release_evidence_exclusion_stays_narrow(tmp_path: Path) -> None:
         assert rel in flagged, f"{rel} must still be capped"
 
 
+def test_experiment_run_records_are_excluded_from_the_scan(tmp_path: Path) -> None:
+    """An experiment's published run records are never scanned.
+
+    They are what a run wrote, copied byte for byte when its result is
+    published: a rater's prompt is a Markdown file of up to eight packets,
+    far over the prose cap, and it can never be split or shortened. Uses an
+    invented experiment to prove the pattern is not one experiment's list.
+    """
+    record = "evaluators/experiments/EXP-999/runs/ai-raters/person-1/scored/batch-01.md"
+    _write(tmp_path, record, DEFAULT_MAX_DOC_WORDS + 50)
+
+    assert record not in _measured(tmp_path)
+
+
+def test_experiment_run_records_exclusion_stays_narrow(tmp_path: Path) -> None:
+    """Only Markdown records below ``runs/`` escape the cap.
+
+    Three hand-written neighbours stay capped: the page that describes the
+    records, which sits in ``runs/`` itself; any other document in the
+    experiment's materials; and the result, under ``docs/experiments/``.
+    Code stays capped too, wherever it sits: the exclusion list feeds the
+    code scan as well, so a pattern without ``.md`` would exempt a script
+    put beside the records.
+    """
+    neighbours = (
+        "evaluators/experiments/EXP-999/runs/README.md",
+        "evaluators/experiments/EXP-999/notes.md",
+        "docs/experiments/EXP-999-result.md",
+    )
+    for rel in neighbours:
+        _write(tmp_path, rel, DEFAULT_MAX_DOC_WORDS + 50)
+    script = "evaluators/experiments/EXP-999/runs/tools/rescore.py"
+    (tmp_path / script).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / script).write_text(
+        "x = 1\n" * (file_size.DEFAULT_MAX_CODE_LINES + 1), encoding="utf-8",
+    )
+
+    failures, code_results, doc_results = _scan_files(tmp_path)
+    measured = dict(doc_results) | dict(code_results)
+    flagged = {f.file for f in failures}
+
+    for rel in (*neighbours, script):
+        assert rel in measured, f"{rel} must still be scanned"
+        assert rel in flagged, f"{rel} must still be capped"
+
+
+def test_experiment_run_records_exclusion_crosses_folders(tmp_path: Path) -> None:
+    """What the pattern exempts beyond its plain reading, pinned on purpose.
+
+    ``fnmatch``'s ``*`` crosses ``/``, as the release-evidence patterns'
+    comment already says. So Markdown is exempt at any depth below a
+    ``runs/`` subfolder, and under a ``runs/`` folder that is itself nested
+    in the experiment's materials. Nothing hand-written belongs in either
+    place: a records folder holds copies. This test states that reach, so
+    whoever narrows or widens the pattern sees what moved.
+    """
+    exempt = (
+        "evaluators/experiments/EXP-999/runs/ai-raters/README.md",
+        "evaluators/experiments/EXP-999/analysis/runs/2027-01/findings.md",
+    )
+    for rel in exempt:
+        _write(tmp_path, rel, DEFAULT_MAX_DOC_WORDS + 50)
+
+    measured = _measured(tmp_path)
+
+    for rel in exempt:
+        assert rel not in measured, f"{rel}: the pattern's reach changed"
+
+
 # --------------------------------------------------------------------------
 # Allowlist hygiene (live repo)
 # --------------------------------------------------------------------------

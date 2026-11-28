@@ -1,6 +1,6 @@
 # Enforcement Matrix: Size, Documents and Process
 
-> **Last updated**: 2026-11-26
+> **Last updated**: 2026-11-27
 > The second half of the [enforcement matrix](enforcement-matrix.md): the
 > rules about file size and shape, about documents, and about how work is
 > planned and merged. Split out on 2026-11-12, when the matrix reached its
@@ -18,6 +18,7 @@
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | Required (`File size check`) + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_entries_are_not_already_excluded` | Convention + unit tests |
 | Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory; the tag PR drops an open plan's last-resort entry) | Required (`Python` unit tests pin it) |
+| An experiment's published run records are copies of what the run wrote, exempt from the cap; the page that describes them and any code beside them are not | documentation-guide §Where Documents Live and §Size Limits | `file_size.py` excludes Markdown below a subfolder of `evaluators/experiments/*/runs/`; `test_experiment_run_records_exclusion_stays_narrow` and `…_crosses_folders` pin what it reaches | Required (`Python` unit tests pin it) |
 | Near-cap notice at 3 % of each limit | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; copilot-instructions | — | **Guidance, stated as such** since the BRANCHING rewrite — a third of merges exceed it, almost all docs-heavy; code PRs split |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
