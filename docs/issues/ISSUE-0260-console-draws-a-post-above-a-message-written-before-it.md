@@ -80,3 +80,9 @@ Add a test with the case above.
 > confirmed there on `main`. Severity `low` is proposed, not ruled:
 > nothing is lost and a reload corrects the order. ISSUE-0222, where
 > messages went missing, was `medium`.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

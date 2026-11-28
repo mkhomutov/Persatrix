@@ -93,3 +93,18 @@ left.
 > 2026-11-26 — filed by the review of
 > [#1146](https://github.com/mkhomutov/Persatrix/pull/1146), which could
 > not edit any of these places. Each was read on `main` at `c409027b`.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
+> The same ruling is the amendment line this issue asked for: ruling (e)'s
+> warning is over 700 lines. Its PR corrected the v0.4.0 plan's risk row.
+> It also edited the header notes of four PR plans (RFC 0012, RFC 0009
+> Phases 3–4, RFC 0021 Phase 2 and RFC 0041) and left their tables: each
+> header now points here. That is a reading of "the first PR that reopens
+> that plan" as the first PR that does a row's work, since only that PR
+> can say whether it still splits the file. Still open on that reading:
+> the table rows of those four plans and of RFC 0042's, and the docstring
+> of `agents/channel_receive.py`.

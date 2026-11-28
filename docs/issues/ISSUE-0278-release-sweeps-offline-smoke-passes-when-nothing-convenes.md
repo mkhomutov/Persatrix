@@ -66,3 +66,9 @@ and the release cycle's sentence and the testing strategy's row with it.
 > and before the convening, and counts only the others. So the fix
 > proposed above is sound on a checkout that has run the demo before,
 > which is where a release sweep runs.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

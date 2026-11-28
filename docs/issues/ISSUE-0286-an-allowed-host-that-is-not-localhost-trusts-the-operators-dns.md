@@ -91,3 +91,9 @@ while the stack runs with sign-in off, or turn sign-in on.
 > names a browser resolves by itself; no such attack was carried out. Filed
 > with that fix, [#1147](https://github.com/mkhomutov/Persatrix/pull/1147).
 > The severity is proposed, not ruled.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

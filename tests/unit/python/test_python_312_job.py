@@ -11,7 +11,7 @@ what makes that job mean something:
 - it installs from the pins by the one install command, and runs the whole
   unit tree with nothing left out, by the same target a developer runs;
 - it runs on every pull request and fails when a test fails;
-- it is named as not required, where the required checks are versioned.
+- it is a required check, where the required checks are versioned.
 
 Files are read as text and YAML; nothing here installs or runs the suite.
 """
@@ -131,11 +131,13 @@ def test_it_runs_on_every_pull_request_and_a_failed_test_fails_it() -> None:
     assert "PYTEST_ADDOPTS" not in {**(ci_workflow().get("env") or {}), **(job.get("env") or {})}
 
 
-def test_it_is_named_as_not_required() -> None:
-    """Which checks `main` requires is the owner's setting. The job is in the
-    versioned file as not required, with a reason, and not among the required."""
+def test_it_is_a_required_check() -> None:
+    """The job is among the required checks in the versioned file, and no
+    longer named there as not required: ruling (ab) of the sequencing
+    Amendment 2026-11-28, after 64 green runs. A job in both lists would say
+    two things. Applying the file to `main` is the owner's step."""
     config = json.loads(
         (REPO_ROOT / "docs" / "methodology" / "branch-protection.json").read_text(encoding="utf-8")
     )
-    assert JOB_NAME not in config["contexts"]
-    assert JOB_NAME in config["not_required"]
+    assert JOB_NAME in config["contexts"]
+    assert JOB_NAME not in config["not_required"]

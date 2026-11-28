@@ -56,3 +56,9 @@ before merging: no CI job starts these images.
 
 > 2026-11-14 — noticed while predicting what the new Dependabot entry
 > for compose files would propose.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

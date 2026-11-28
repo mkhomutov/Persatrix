@@ -2,11 +2,16 @@
 
 > Owning RFC: [0041-typed-event-taxonomy-lifecycle-callbacks.md](0041-typed-event-taxonomy-lifecycle-callbacks.md) · Target: **v0.4.0**, as the cuttable row D4 of the [v0.4.0 plan](../v0.4.0-plan.md#progress). Reciprocal gate: [RFC 0044 PR 4b](0044-pr-plan.md) consumes the typed events PR 7 emits.
 
-> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
-> PR from this plan starts or merges before then, and the drafts
+> **Waits for EXP-002's pre-registration**, by the
+> [Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
+> The v0.4.0 pause of 2026-11-07 has ended, but a row that had not started,
+> as D4 had not, starts only after that document merges. No PR from this
+> plan starts or merges before then, and the drafts
 > [#754](https://github.com/mkhomutov/Persatrix/pull/754) and
 > [#755](https://github.com/mkhomutov/Persatrix/pull/755) wait with it
-> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+> ([why](../v0.4.0-plan.md#resumed-in-a-changed-order)). The
+> size table below predates the 700-line warning
+> ([ISSUE-0288](../issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
 
 ## Overview
 

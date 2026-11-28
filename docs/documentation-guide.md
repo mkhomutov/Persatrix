@@ -135,7 +135,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Golden-trace evals | `docs/evaluators-guide.md`; `evaluators/eval_sets/README.md` |
 | Prompt assets | `docs/prompt-organization.md` |
 | Open-core licence tiers | `docs/open-core-reserved-seams.md` (policy in RFC 0045) |
-| Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; what the four September reviews found, how their disagreements were settled, and the five checks the synthesis added in `docs/project-strategy-four-reviews.md`; numbers and commands in `docs/project-strategy-evidence.md` |
+| Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; what the four September reviews found, how their disagreements were settled, the five checks the synthesis added and what became of each recommendation in `docs/project-strategy-four-reviews.md`; numbers and commands in `docs/project-strategy-evidence.md`; the record of the review held after EXP-001's result in `docs/project-strategy-review-2026-11-28.md` |
 | Pre-registered experiments (materials, arms, scoring, result) | `docs/experiments/EXP-NNN-*.md`; materials in `evaluators/experiments/EXP-NNN/`, and a run's published records in its `runs/` folder |
 | Companion discussion documents (spawn RFCs, own no code) | `docs/memory-quality-roadmap.md`, `docs/storage-architecture-roadmap.md`, `docs/agent-runtime-vocabulary-roadmap.md`, `docs/memory-scope-axes.md` |
 | Branching, commits, PR titles | `docs/BRANCHING.md` |
@@ -213,10 +213,12 @@ to make room ("split, don't trim").
   at about 250 lines of code, and file lengths went on piling up just under
   500. Counting code lines only was considered and not taken: it needs a
   comment parser for each of five languages, and a miscount would fail CI.
-  The failure stays at 800. No sequencing amendment records this yet, so
-  ruling (e)'s own text still says 500; until an amendment carries the new
-  figure, this entry is where the change is written down
-  ([ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
+  The failure stays at 800.
+  [Ruling (ab)](v0.4.x-sequencing-2026-11-28.md#rulings) of the sequencing
+  Amendment 2026-11-28 carries the new figure and amends ruling (e), whose
+  own text still says 500. The plans and the comment that still give 500 as
+  the mark are listed in
+  [ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md).
 - **A document** still fails one word over its cap. Split it before the cap
   arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
   cap turns every later fix into deleted context. A patch release's version

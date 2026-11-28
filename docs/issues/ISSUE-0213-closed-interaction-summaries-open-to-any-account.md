@@ -71,3 +71,10 @@ the caller's principal and by protection level.
 > gap opens only when account administration (RFC 0039 Phase 3, row D3)
 > ships; both rows are paused until the next strategy review
 > ([v0.4.0 plan](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+
+> 2026-11-28 — **the route change resumes with row A4**, which carries
+> ISSUE-0117's fix: the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings)
+> ended the v0.4.0 pause (rulings y and z). Row D3, account administration,
+> had not started, so it waits until EXP-002's pre-registration merges. The
+> gap still opens only when D3 ships.

@@ -8,9 +8,13 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress); its rows C1–C3 are this plan's three phases
 
-> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
-> PR from this plan starts or merges before then
-> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+> **Resumed in part** by the
+> [Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings),
+> after the pause of 2026-11-07: Phase 1 (row C1) may go on; Phases 2 and 3
+> (C2, C3) wait until EXP-002's pre-registration merges
+> ([why](../v0.4.0-plan.md#resumed-in-a-changed-order)). The
+> [size table](#file-size-constraints) predates the 700-line warning
+> ([ISSUE-0288](../issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
 
 > Sizes are calibrated (1.7× naive, the v0.1 factor). Every PR stays under 500
 > changed lines and writes its failing test first.

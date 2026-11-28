@@ -143,3 +143,12 @@ from an agent's publish and store the rest, or keep the refusal.
 > model can write one in any deployment. The section above and the
 > impact now say so. Severity stays as proposed: an ordinary reply
 > mentions only the sender it answers.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
+> The decision of 2026-11-16 above now has a Known Gaps line in the
+> [v0.4.0 plan](../v0.4.0-plan.md#known-gaps), by the same ruling, so the
+> release notes carry it.

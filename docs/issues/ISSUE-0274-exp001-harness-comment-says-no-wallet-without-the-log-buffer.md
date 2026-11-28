@@ -51,3 +51,9 @@ keeps the deployment's logs in its own folder.
 > ([#1135](https://github.com/mkhomutov/Persatrix/pull/1135)).
 > Severity proposed from the tracker's precedent for a stale comment
 > (low); not ruled by the maintainer.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

@@ -100,3 +100,9 @@ written into a stream that has ended.
 > agent's logging the warning is one JSON line with no stack frames, or
 > 160 lines and more in the `pretty` format. The pace, and that no agent
 > stops or waits, were measured and stand.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

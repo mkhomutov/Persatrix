@@ -106,3 +106,9 @@ The docs that still present delegation as working are listed in
 > The row "A delegation that names no tool" was added the same day, after
 > that pull request's review: the first text said the delegation's list
 > holds a sub-agent and left out that its default holds nothing.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

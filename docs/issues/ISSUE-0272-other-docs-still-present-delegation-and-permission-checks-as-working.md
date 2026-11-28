@@ -92,3 +92,9 @@ changed by another open pull request when this was filed, which is why
 > unchanged: none is built or in use. The rule that a sub-agent gets no
 > more than its parent is tracked in
 > [ISSUE-0285](ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md).
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

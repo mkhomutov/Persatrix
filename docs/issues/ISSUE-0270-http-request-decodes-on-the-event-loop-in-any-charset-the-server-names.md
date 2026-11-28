@@ -89,3 +89,9 @@ which another coroutine must run.
 > 2026-11-16 — found by the review of [#1132](https://github.com/mkhomutov/Persatrix/pull/1132),
 > which bounded the bytes this code reads. Filed there; the decoding is
 > not changed by that pull request.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).

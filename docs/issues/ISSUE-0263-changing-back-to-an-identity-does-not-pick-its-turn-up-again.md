@@ -77,3 +77,9 @@ test for changing away and back inside one turn.
 > `low` is proposed, not ruled: it needs two identity changes inside
 > one turn, in a mode meant for local testing, and loses nothing.
 > ISSUE-0226 itself was `low`.
+
+> 2026-11-28 — severity ruled `low`, as proposed: the maintainer's
+> ruling at the
+> [strategy review of 2026-11-28](../project-strategy-review-2026-11-28.md#3-the-maintainers-rulings),
+> ratified by ruling (ab) of the
+> [sequencing Amendment 2026-11-28](../v0.4.x-sequencing-2026-11-28.md#rulings).
