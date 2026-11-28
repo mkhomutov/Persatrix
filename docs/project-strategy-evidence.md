@@ -171,8 +171,8 @@ From [v0.3.x sequencing](v0.3.x-sequencing.md); each row is one amendment.
 No amendment after 2026-06-28 cites anything from outside the repository.
 Since 2026-09-12 every amendment carries an External evidence section, and
 all four to 2026-10-21 are empty of positives. The fifth, of 2026-11-28,
-records the first positive entry: an experiment result published, EXP-001's,
-on 2026-11-27.
+records the first positive entry by the rule's letter: an experiment result
+published, EXP-001's, on 2026-11-28. That amendment does not lean on it.
 Nothing records the v0.3.11 demo being shown to anyone.
 
 ## 8. Market claims — perishable
