@@ -146,7 +146,7 @@ at 2026-10-20 and at 2026-11-28.
 | Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` (now :281-284) injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live". No EXP-001 arm varies trust, so its result says nothing about this row |
 | The audience gate was shadow-only | [RFC 0037 audience amendment](rfcs/0037-amendment-audience-egress.md) status 🔄 Shadow; flip is verdict-gated (v0.3.16 PR A3). Live since A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) |
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)). EXP-001's scored run: 150 meetings, $44.09 for the arms and $4.44 for the judge |
-| Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
+| Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. The next ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) ordered none either, and ruled that it reopens only on an outside ask, for the next sequencing amendment to ratify. RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
 | Licence grant | Non-commercial use only, deployments under 10 users ([LICENSE](../LICENSE) Additional Use Grant) |
 | Interop drafts waiting | [#754](https://github.com/mkhomutov/Persatrix/pull/754) and [#755](https://github.com/mkhomutov/Persatrix/pull/755) (RFC 0041 Phase 1) open since 2026-07-18; still drafts at 2026-10-20, now v0.4.0's cuttable D4; still drafts at 2026-11-28, waiting with the pause |
 
@@ -200,6 +200,8 @@ that a market claim written in May was false by September.
 Sources are listed in #898's evidence file (fourteen links) and are not
 copied here; a review that relies on one re-fetches it. The first review
 (2026-10-20) did not re-check them, since none of its rulings relies on them.
+Nor did the review of 2026-11-28, for the same reason: it ordered no
+extraction.
 
 ## Related documentation
 
@@ -207,6 +209,8 @@ copied here; a review that relies on one re-fetches it. The first review
   these numbers support, with the four reviews' findings and their
   recommendation ledger in its
   [four-reviews companion](project-strategy-four-reviews.md).
+- [The review of 2026-11-28](project-strategy-review-2026-11-28.md) — what
+  the review that measured the 2026-11-28 figures recorded and ruled.
 - [v0.3.x sequencing](v0.3.x-sequencing.md) — the decision log in §7.
 - [Documentation guide § Size limits](documentation-guide.md#size-limits) —
   the caps §4 measures against.

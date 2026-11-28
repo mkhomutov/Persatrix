@@ -30,8 +30,9 @@
 > [review log](project-strategy.md#10-review-cadence-and-log).
 >
 > [§4](#4-recommendation-ledger), the recommendation ledger, was the evidence
-> companion's §9. It moved here on 2026-11-28 with every row unchanged, when
-> that file neared its word cap.
+> companion's §9. It moved here whole on 2026-11-28, when that file neared
+> its word cap. The [review held that day](project-strategy-review-2026-11-28.md)
+> then added its outcome to the four rows it bears on.
 
 ## 1. What the four reviews established
 
@@ -116,7 +117,7 @@ decided at the first review.
 | #895 R4 | Choose one wedge; rewrite the README | Changed — wedge stated as a hypothesis; README changes on the result (§5); since [ruling (v)](v0.4.x-sequencing-2026-10-21.md#rulings), after the strategy rewrite |
 | #895 R5 | Cut the cycle to plan → implement → tag | Adopted as §7.3 |
 | #895 R6 | Raise the file cap to ~800 or retire it | Adopted as §7.4 (warning at 500, gate at 800) |
-| #895 R7 | Retire the Rust CLI | Changed — freeze now, delete on the wedge decision (§2); with no wedge decision to come, [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes whether and when to the next strategy review |
+| #895 R7 | Retire the Rust CLI | Changed — freeze now, delete on the wedge decision (§2); with no wedge decision to come, [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes whether and when to the next strategy review; that review ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) removed neither, kept both frozen, and left the decision to the first review after EXP-002's pre-registration merges |
 | #895 R8 | Reconsider BUSL | Deferred — default Apache-2.0 at the first review (§4); applied there on 2026-10-20, for the [Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#rulings) (ruling w) |
 | #896 S1 | External-evidence input to Before Phase 0 | Adopted as §7.1 |
 | #896 S2 | Ship MCP, memory side first | Changed — the MCP server is one of the two interop slices (§6.7) |
@@ -129,15 +130,15 @@ decided at the first review.
 | #897 S1 | Run the ablation before repositioning | Adopted; widened to the five-arm experiment (§4) |
 | #897 S2 | Make `MEMORY_BUDGET_TOKENS` configurable first | Adopted as §6.2 |
 | #897 S3 | Reposition on the gate, not on memory | Changed — the gate is the fallback wedge if C does not beat A (§4) |
-| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8); at the first review (2026-10-20) no extraction was ordered; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)) |
-| #897 S5 | Retire the trust score or evidence it | Adopted as §8 last row |
+| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8); at the first review (2026-10-20) no extraction was ordered; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)), which ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) retired no component |
+| #897 S5 | Retire the trust score or evidence it | Adopted as §8 last row; EXP-001 has no arm that varies trust, so the review of [2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings) kept the score as still unevidenced, for EXP-002's pre-registration to isolate or the review after it to retire |
 | #897 S6 | Adopt #896's external-evidence gate | Adopted as §7.1 |
 | #898 R1 | Pause v0.4.0; finish v0.3.16 small | Adopted as §6.1 |
 | #898 R2 | One published experiment, four setups | Adopted; a fifth arm added for the allocator (§4) |
 | #898 R3 | Name one first user and job in the README | Changed — named as a hypothesis (§5); README after the result; since [ruling (v)](v0.4.x-sequencing-2026-10-21.md#rulings), after the strategy rewrite instead, without waiting for EXP-001 |
 | #898 R4 | First contact in five minutes: images, binaries, demo, transcript | Adopted as §6.5 |
 | #898 R5 | MCP client and an A2A endpoint | Changed — one slice, RFC 0043 preferred (§3.4, §6.7) |
-| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8), which (2026-10-20) ordered none; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)) |
+| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8), which (2026-10-20) ordered none; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)), which ([2026-11-28](project-strategy-review-2026-11-28.md#3-the-maintainers-rulings)) ordered none either and ruled that it reopens only on an outside ask |
 | #898 R7 | Process diet; cap as a warning | Adopted as §7.3–§7.4 |
 | #898 R8 | Review on 2026-11-30 against outcomes | Adopted as the first review date (§10) |
 

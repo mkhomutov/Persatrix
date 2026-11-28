@@ -5,13 +5,15 @@
 > **Read under the goal**: since the [Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#amendment-2026-10-21--the-goal-replaces-the-product-reading-and-the-licence-default-applies),
 > the project's goal decides, not §4's product reading. Until this document
 > is rewritten around the goal, that amendment holds wherever the two disagree.
-> **Last reviewed**: 2026-10-20 at `04bc24d0` — the first review, held at the
-> [v0.4.0 plan](v0.4.0-plan.md) opening.
-> **Next review**: the first after EXP-001's result is published, or
-> 2026-12-15, whichever comes first — see [§10](#10-review-cadence-and-log).
-> v0.4.0 is paused until then, by the maintainer's decision of 2026-11-07
-> ([v0.4.0 plan](v0.4.0-plan.md#paused-until-the-strategy-review)), and by
-> a ruling of 2026-11-21 this document's rewrite waits for that review too.
+> **Last reviewed**: 2026-11-28 at `9ec80213` — the
+> [review held after EXP-001's result](project-strategy-review-2026-11-28.md).
+> **Next review**: the first after EXP-002's pre-registration merges, or
+> 2027-01-23, whichever comes first — see [§10](#10-review-cadence-and-log).
+> v0.4.0 has been paused since 2026-11-07
+> ([v0.4.0 plan](v0.4.0-plan.md#paused-until-the-strategy-review)). That
+> review ruled that the pause ends when the sequencing amendment that
+> ratifies it merges, and this document's rewrite waits for that amendment
+> too.
 > **Supersedes**: the four September 2026 strategy reviews,
 > [#895](https://github.com/mkhomutov/Persatrix/pull/895),
 > [#896](https://github.com/mkhomutov/Persatrix/pull/896),
@@ -230,11 +232,15 @@ not by this file.
 | 2026-09-12 | `604fab72` | The maintainer chose the product reading. [Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ratifies §6 items 1–4, §7 items 1–4 as rulings, and §8's RFC 0046 row; K1 rides v0.3.16 as a cuttable fold-in. | None; the experiment has not run. |
 | 2026-10-18 | `c6ef01d5` | The maintainer named the project's goal: a society of AI agents that pursues long, hard goals. [Amendment 2026-10-18](v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens) ratifies it, turns EXP-001 from the gate into a measurement and opens v0.4.0 as already defined. By the route EXP-001's pre-registration §5 sets, this review also changes two things the pre-registration's part 2 says: what a fired rule decides, alike for all four rules, and that the first review after the result receives it. Only the outside-use figures were measured again. | None; the scored run has not started. |
 | 2026-10-20 | `04bc24d0` | **The first review**, held at the [v0.4.0 plan](v0.4.0-plan.md) opening (ruling (r) of [v0.4.0's shape](v0.4.x-sequencing.md#rulings)). The evidence was re-run and the four reviews' findings re-verified: F5 half holds, since the file cap became a warning (ruling (e)) but files still cluster just under 500, and the rest stand. Two rulings and one default, for the [sequencing Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#amendment-2026-10-21--the-goal-replaces-the-product-reading-and-the-licence-default-applies) to ratify. The maintainer's goal replaces the product reading (ruling (g)), and the strategy is rewritten around it in a later PR. §4's licence default applies, since no commercial conversation is in progress, so everything outside the reserved seams moves to Apache-2.0. §4's other default, sent with them: the workflow engine is frozen, since EXP-001 does not use it, and leaves the README when ruling (j) next allows a rewrite. Until that amendment, the External evidence rule and the README rule keep binding. No governance-core extraction is ordered, so RFC 0046 stays where ruling (c) left it (§8). The trust score (§8) waits for EXP-001's result. §6 items 1, 2 and 4 are done; item 3's harness is built and its scored run not started; items 5–7 have not started. | None; the scored run has not started. |
+| 2026-11-28 | `9ec80213` | **The review after EXP-001's result**, in full in [a file of its own](project-strategy-review-2026-11-28.md). The evidence was re-run and the four reviews' findings re-verified: F6 no longer holds as written, since EXP-001 compared the system with one model call; F5 half holds, as before; the rest stand. Nothing has boarded by ruling (u). The maintainer gave six rulings for the next sequencing amendment to ratify: the society work goes on, with EXP-002's pre-registration ahead of any v0.4.0 row not yet started; the pause ends when that amendment merges; no extraction is ordered, no component is retired, and the Rust CLI and the workflow engine stay frozen; four small rulings ride the amendment; the trust score stays, unevidenced; the next review follows EXP-002's pre-registration. | None as registered: two AI raters scored in the two people's place. On the AI-scored figures, rule 1. |
 
 ## Related documentation
 
 - [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full, and
   the four reviews' recommendation ledger.
+- [The review of 2026-11-28](project-strategy-review-2026-11-28.md) — the
+  rule it logs from EXP-001's result, that rule's limits, and the
+  maintainer's six rulings.
 - [Evidence companion](project-strategy-evidence.md) — the commands behind
   most numbers, and the perishable market claims.
 - [v0.3.x sequencing](v0.3.x-sequencing.md) — the amendments the §10 log
